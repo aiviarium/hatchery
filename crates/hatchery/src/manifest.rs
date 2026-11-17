@@ -264,7 +264,7 @@ pub struct Origin {
     pub repository: Option<String>,
     /// The commit `HEAD` was at. None when the folder is not in a git checkout.
     pub commit: Option<String>,
-    /// When the egg was built. It is `SOURCE_DATE_EPOCH` when set, else the commit time of `HEAD`, else the current time.
+    /// When the egg was built. It is `SOURCE_DATE_EPOCH` when set, else the commit time of `HEAD`. Left out when neither exists.
     pub built: Option<Timestamp>,
     /// The Hatchery version that packed it.
     pub hatchery: Option<String>,

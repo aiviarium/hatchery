@@ -46,7 +46,7 @@ pub struct PackOptions<'a> {
     /// The origin section to write instead of reading it from git.
     pub origin: Option<Origin>,
     /// The build time when neither `origin` nor `SOURCE_DATE_EPOCH` nor the
-    /// git commit gives one.
+    /// git commit gives one. Without it, `built` is left out of the origin.
     pub now: Option<Timestamp>,
 }
 
@@ -456,12 +456,13 @@ fn origin_of(dir: &Path, manifest: &Manifest, now: Option<Timestamp>) -> Origin 
                 .ok()
                 .map(Timestamp::from_secs)
         })
-        .or(now)
-        .unwrap_or_else(Timestamp::now);
+        .or(now);
+    // With no commit and no `SOURCE_DATE_EPOCH`, the clock would make two
+    // packs of the same folder differ, so `built` is left out.
     Origin {
         repository,
         commit,
-        built: Some(built),
+        built,
         hatchery: Some(crate::VERSION.to_string()),
         extra: Vec::new(),
     }

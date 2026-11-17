@@ -990,3 +990,32 @@ fn eggs_do_not_nest() {
     }
     assert!(Egg::open(inner).is_err());
 }
+
+#[test]
+fn packing_a_folder_outside_git_is_reproducible() {
+    let d = tempfile::tempdir().unwrap();
+    write(
+        d.path(),
+        "package.kdl",
+        "package {\n  group g\n  id demo\n  version \"1.0.0\"\n}\ntargets {\n  crow\n}\n",
+    );
+    write(d.path(), "crow/a.txt", "a");
+    let o = PackOptions {
+        base: true,
+        no_build: true,
+        ..Default::default()
+    };
+    let first = pack(d.path(), &o).unwrap().pop().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let second = pack(d.path(), &o).unwrap().pop().unwrap();
+    assert_eq!(first.sha256(), second.sha256());
+    // A temporary folder inside a checkout gets the commit time instead.
+    let in_checkout = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(d.path())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if std::env::var_os("SOURCE_DATE_EPOCH").is_none() && !in_checkout {
+        assert_eq!(first.manifest().origin.as_ref().unwrap().built, None);
+    }
+}

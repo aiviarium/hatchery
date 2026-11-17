@@ -156,4 +156,4 @@ origin {
 }
 ```
 
-`origin` answers "what source is this egg" after the fact. `built` is `SOURCE_DATE_EPOCH` if set, else the commit time of `HEAD` when the folder is in a git checkout, else the current time. Packing the same commit twice gives the same egg.
+`origin` answers "what source is this egg" after the fact. `built` is `SOURCE_DATE_EPOCH` if set, else the commit time of `HEAD` when the folder is in a git checkout, else it is left out. Packing the same folder twice gives the same egg.
