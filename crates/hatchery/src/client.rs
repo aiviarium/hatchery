@@ -428,6 +428,7 @@ impl Prepared {
             folder: None,
             sha256: self.base_sha.clone(),
             variants: self.variants.clone(),
+            extra: BTreeMap::new(),
         };
         match &self.origin {
             Origin::Registry => l.registry = Some(redact_url(&self.label)),
@@ -1045,6 +1046,9 @@ impl Client {
             unpacked.set(&p.name, &p.base_sha);
             unpacked.save(dir)?;
             let mut entry = p.locked();
+            if let Some(old) = lock.get(&p.name) {
+                entry.extra = old.extra.clone();
+            }
             if keep_lock_entry && let Some(old) = lock.get(&p.name) {
                 // An install from the lock keeps what the lock says of the source.
                 let mut kept = old.clone();

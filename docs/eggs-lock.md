@@ -3,6 +3,8 @@
 `eggs.lock` is in the install folder. Hatchery writes it in TOML. It records what was installed and from where.
 
 ```toml
+format = 1
+
 [[package]]
 name     = "aiviarium/claude"
 version  = "1.4.0"
@@ -19,6 +21,7 @@ sha256   = "9f2c…"
 
 | Key | Meaning |
 | --- | --- |
+| `format` | The format of the file, 1. A file without it is format 1. Another number is refused |
 | `name`, `version` | The package and the installed version |
 | `targets` | The targets installed from it |
 | `registry` | The address of a static or git registry it came from |
@@ -28,7 +31,7 @@ sha256   = "9f2c…"
 | `sha256` | The base egg's checksum |
 | `variants` | The variant eggs fetched so far, as `"<target>.<key>" = sha256` |
 
-Keys that do not apply are left out. Packages are sorted by name.
+Keys that do not apply are left out, and packages are sorted by name. When Hatchery writes the file again, it keeps the keys it does not know, at the top and in each package.
 
 ## Using the lock
 
@@ -47,7 +50,7 @@ Keys that do not apply are left out. Packages are sorted by name.
 <dir>/.hatchery/unpacked.toml                the checksum of the base egg each package folder was unpacked from
 ```
 
-`seen.toml` backs the minimum release age. Keep it with the install folder. `unpacked.toml` tells `install` what each folder contains. Without it, `install` unpacks every package again.
+`seen.toml` backs the minimum release age. Keep it with the install folder. It has `format = 1` too, and keeps keys it does not know. `unpacked.toml` tells `install` what each folder contains. Without it, `install` unpacks every package again.
 
 `hatchery list` shows the version in each package's own `package.kdl`, which is what is installed. It can differ from the lock until `install` runs.
 

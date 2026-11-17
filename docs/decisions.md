@@ -38,7 +38,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 
 ## Installed layout
 
-- `<dir>/eggs.lock` is TOML.
+- `<dir>/eggs.lock` is TOML, with `format = 1` at the top. `seen.toml` and `unpacked.toml` in `<dir>/.hatchery/` have it too. Unknown keys are kept when Hatchery writes them again.
 - `<dir>/<group>/<id>/` is the unpacked base egg: `package.kdl`, the about files and every target's shared files.
 - `<dir>/<group>/<id>/<target>/variants/<key>/` is each variant that was fetched, unpacked from a variant egg or from inside a fat egg.
 - `<dir>/.hatchery/seen.toml` records when this installation first saw each version in each registry.

@@ -21,25 +21,48 @@ pub const DIR: &str = ".hatchery";
 pub const FILE: &str = "seen.toml";
 
 /// What is known about one version in one registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Record {
     /// When this installation first saw the version in the registry.
     pub first_seen: Timestamp,
     /// Whether it was in the first listing of the package from the
     /// registry. Those versions were there before this installation looked.
     pub first_listing: bool,
+    #[serde(flatten)]
+    extra: BTreeMap<String, toml::Value>,
 }
 
 type Versions = BTreeMap<String, Record>;
 
 /// The versions this installation has seen in each registry, and when. They are kept in `.hatchery/seen.toml` of the install folder.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Keys this version does not know are kept when the file is written again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Seen {
+    /// The format of the file, [`crate::lock::FORMAT`].
+    #[serde(default = "format_one")]
+    format: u32,
     /// Registry label, then package name, then version.
     #[serde(default)]
     registry: BTreeMap<String, BTreeMap<String, Versions>>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, toml::Value>,
     #[serde(skip)]
     dirty: bool,
+}
+
+fn format_one() -> u32 {
+    crate::lock::FORMAT
+}
+
+impl Default for Seen {
+    fn default() -> Seen {
+        Seen {
+            format: crate::lock::FORMAT,
+            registry: BTreeMap::new(),
+            extra: BTreeMap::new(),
+            dirty: false,
+        }
+    }
 }
 
 impl Seen {
@@ -56,7 +79,10 @@ impl Seen {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Seen::default()),
             Err(e) => return Err(e).at_path(&path),
         };
-        toml::from_str(&text).map_err(|e| Error::invalid(path.display(), e.to_string().trim()))
+        let seen: Seen = toml::from_str(&text)
+            .map_err(|e| Error::invalid(path.display(), e.to_string().trim()))?;
+        crate::lock::check_format(&path.display().to_string(), seen.format)?;
+        Ok(seen)
     }
 
     /// Writes the records when they changed since they were read.
@@ -98,6 +124,7 @@ impl Seen {
                 e.insert(Record {
                     first_seen: now,
                     first_listing: first,
+                    extra: BTreeMap::new(),
                 });
                 self.dirty = true;
             }
@@ -250,6 +277,32 @@ mod tests {
                 .first_listing
         );
         std::fs::write(Seen::path(tmp.path()), "registry = 3").unwrap();
+        assert!(Seen::load(tmp.path()).is_err());
+    }
+
+    #[test]
+    fn writes_the_format_and_keeps_unknown_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let name = Name::parse("a/b").unwrap();
+        std::fs::create_dir_all(tmp.path().join(DIR)).unwrap();
+        std::fs::write(
+            Seen::path(tmp.path()),
+            "note = \"kept\"\n[registry.r.\"a/b\".\"1.0.0\"]\nfirst_seen = \"2026-11-10T00:00:00Z\"\nfirst_listing = true\nby = \"x\"\n",
+        )
+        .unwrap();
+        let mut seen = Seen::load(tmp.path()).unwrap();
+        seen.record(
+            "r",
+            &name,
+            [&Version::new(1, 1, 0)],
+            t("2026-11-11T00:00:00Z"),
+        );
+        seen.save(tmp.path()).unwrap();
+        let text = std::fs::read_to_string(Seen::path(tmp.path())).unwrap();
+        assert!(text.starts_with("format = 1\n"), "{text}");
+        assert!(text.contains("note = \"kept\""), "{text}");
+        assert!(text.contains("by = \"x\""), "{text}");
+        std::fs::write(Seen::path(tmp.path()), "format = 2\n").unwrap();
         assert!(Seen::load(tmp.path()).is_err());
     }
 }

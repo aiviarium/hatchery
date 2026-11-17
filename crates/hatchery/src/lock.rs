@@ -13,16 +13,46 @@ use crate::name::Name;
 /// The name of the lock file in an install folder.
 pub const FILE: &str = "eggs.lock";
 
+/// The format of `eggs.lock` and of the files in `.hatchery/` this crate writes.
+pub const FORMAT: u32 = 1;
+
 /// The packages installed in a folder. It is the content of `eggs.lock`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Keys this version does not know are kept when the file is written again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Lock {
+    /// The format of the file, [`FORMAT`]. A file without it is format 1.
+    #[serde(default = "format_one")]
+    pub format: u32,
     /// The installed packages. [`Lock::save`] writes them sorted by name.
     #[serde(default, rename = "package")]
     pub packages: Vec<LockedPackage>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, toml::Value>,
 }
 
-/// One installed package.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl Default for Lock {
+    fn default() -> Lock {
+        Lock {
+            format: FORMAT,
+            packages: Vec::new(),
+            extra: BTreeMap::new(),
+        }
+    }
+}
+
+/// Refuses a file of a format this version cannot read.
+pub(crate) fn check_format(what: &str, format: u32) -> Result<()> {
+    if format != FORMAT {
+        return Err(Error::invalid(
+            what,
+            format!("format {format} is not supported; this Hatchery reads format {FORMAT}"),
+        ));
+    }
+    Ok(())
+}
+
+/// One installed package. Keys this version does not know are kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LockedPackage {
     /// The package.
     pub name: Name,
@@ -56,6 +86,8 @@ pub struct LockedPackage {
     /// The variant eggs fetched so far, `"<target>.<key>" = sha256`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variants: BTreeMap<String, String>,
+    #[serde(flatten)]
+    pub(crate) extra: BTreeMap<String, toml::Value>,
 }
 
 impl Lock {
@@ -67,12 +99,16 @@ impl Lock {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Lock::default()),
             Err(e) => return Err(e).at_path(&path),
         };
-        toml::from_str(&text).map_err(|e| Error::invalid(path.display(), e.to_string().trim()))
+        let lock: Lock = toml::from_str(&text)
+            .map_err(|e| Error::invalid(path.display(), e.to_string().trim()))?;
+        check_format(&path.display().to_string(), lock.format)?;
+        Ok(lock)
     }
 
     /// Writes `eggs.lock` in a folder, sorted by name.
     pub fn save(&self, dir: &Path) -> Result<()> {
         let mut sorted = self.clone();
+        sorted.format = FORMAT;
         sorted.packages.sort_by(|a, b| a.name.cmp(&b.name));
         let text = toml::to_string(&sorted)
             .map_err(|e| Error::invalid(FILE, format!("cannot write: {e}")))?;
@@ -119,7 +155,7 @@ pub(crate) struct Unpacked {
 }
 
 fn format_one() -> u32 {
-    1
+    FORMAT
 }
 
 impl Unpacked {
@@ -175,6 +211,7 @@ mod tests {
             folder: None,
             sha256: "ab".repeat(32),
             variants: BTreeMap::new(),
+            extra: BTreeMap::new(),
         }
     }
 
@@ -217,6 +254,31 @@ mod tests {
         assert!(matches!(Lock::load(tmp.path()), Err(Error::Invalid { .. })));
         std::fs::write(tmp.path().join(FILE), "not toml at all =").unwrap();
         assert!(matches!(Lock::load(tmp.path()), Err(Error::Invalid { .. })));
+    }
+
+    #[test]
+    fn writes_the_format_and_keeps_unknown_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(FILE),
+            "format = 1\nnote = \"kept\"\n\n[[package]]\nname = \"a/b\"\nversion = \"1.0.0\"\n\
+             targets = [\"crow\"]\nsha256 = \"ab\"\nmirror = \"https://example.org\"\n",
+        )
+        .unwrap();
+        let mut lock = Lock::load(tmp.path()).unwrap();
+        lock.set(pkg("a/c", "2.0.0"));
+        lock.save(tmp.path()).unwrap();
+        let text = std::fs::read_to_string(tmp.path().join(FILE)).unwrap();
+        assert!(text.starts_with("format = 1\n"), "{text}");
+        assert!(text.contains("note = \"kept\""), "{text}");
+        assert!(text.contains("mirror = \"https://example.org\""), "{text}");
+        let fresh = tempfile::tempdir().unwrap();
+        Lock::default().save(fresh.path()).unwrap();
+        let text = std::fs::read_to_string(fresh.path().join(FILE)).unwrap();
+        assert!(text.contains("format = 1"), "{text}");
+        std::fs::write(fresh.path().join(FILE), "format = 2\n").unwrap();
+        let err = Lock::load(fresh.path()).unwrap_err();
+        assert!(err.to_string().contains("format 2"), "{err}");
     }
 
     #[test]
