@@ -17,11 +17,14 @@ pub struct Name {
 }
 
 /// Checks that a group or an id can be a folder name on every system:
-/// ASCII letters, digits, `-`, `_` and `.`, not starting with `.`.
+/// ASCII letters, digits, `-`, `_` and `.`, not starting with `.` or `-`,
+/// and not `eggs.lock`, the lock file beside the group folders.
 pub fn validate_segment(kind: &str, s: &str) -> Result<()> {
     let ok = !s.is_empty()
         && s.len() <= 100
         && !s.starts_with('.')
+        && !s.starts_with('-')
+        && s != crate::lock::FILE
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
     if ok {
@@ -29,7 +32,9 @@ pub fn validate_segment(kind: &str, s: &str) -> Result<()> {
     } else {
         Err(Error::invalid(
             kind,
-            format!("{s:?} must be ASCII letters, digits, '-', '_' or '.', and not start with '.'"),
+            format!(
+                "{s:?} must be ASCII letters, digits, '-', '_' or '.', not start with '.' or '-', and not be eggs.lock"
+            ),
         ))
     }
 }
@@ -250,6 +255,8 @@ mod tests {
         assert!(Name::parse("claude").is_err());
         assert!(Name::parse("../x").is_err());
         assert!(Name::new("a", ".hidden").is_err());
+        assert!(Name::new("-a", "x").is_err());
+        assert!(Name::new("eggs.lock", "x").is_err());
 
         let Spec::Registry(w) = Spec::parse("aiviarium/claude@^1.4").unwrap() else {
             panic!()
