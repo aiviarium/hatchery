@@ -24,7 +24,11 @@ use crate::time::Timestamp;
 
 /// A git repository used as a registry.
 pub struct GitRegistry {
+    /// The address git is given. It may carry credentials, so it is never
+    /// shown or recorded.
     url: String,
+    /// The address without credentials: the label of the registry.
+    label: String,
     cache: PathBuf,
     git: Git,
     key: Option<VerifyingKey>,
@@ -54,8 +58,10 @@ impl GitRegistry {
         git: Git,
         key: Option<VerifyingKey>,
     ) -> GitRegistry {
+        let url = url.into();
         GitRegistry {
-            url: url.into(),
+            label: crate::fsx::redact_url(&url),
+            url,
             cache: cache.into(),
             git,
             key,
@@ -66,7 +72,7 @@ impl GitRegistry {
 
     /// The address without credentials, for messages.
     fn shown(&self) -> String {
-        crate::fsx::redact_url(&self.url)
+        self.label.clone()
     }
 
     fn at(&self, name: &Name, version: impl std::fmt::Display) -> At {
@@ -154,6 +160,7 @@ impl GitRegistry {
         };
         let files = BranchFiles {
             url: self.url.clone(),
+            label: self.label.clone(),
             cache: self.cache.clone(),
             git: self.git.clone(),
             commit,
@@ -237,7 +244,7 @@ impl GitRegistry {
 
 impl Source for GitRegistry {
     fn label(&self) -> &str {
-        &self.url
+        &self.label
     }
 
     fn is_local(&self) -> bool {
@@ -275,12 +282,12 @@ impl Source for GitRegistry {
                 let mut offer = match built.remove(&version) {
                     Some(o) => o,
                     None => {
-                        let mut o = Offer::new(name.clone(), version.clone(), &self.url);
+                        let mut o = Offer::new(name.clone(), version.clone(), &self.label);
                         o.built = false;
                         o
                     }
                 };
-                offer.registry = self.url.clone();
+                offer.registry = self.label.clone();
                 offer.commit = Some(commit.clone());
                 offer.git_ref = Some(tag.clone());
                 offer.path = Some(pkg.path.clone());
@@ -288,7 +295,7 @@ impl Source for GitRegistry {
             }
             // Built eggs whose tag is gone or was never made.
             for (_, mut o) in built {
-                o.registry = self.url.clone();
+                o.registry = self.label.clone();
                 o.path = Some(pkg.path.clone());
                 out.push(o);
             }
@@ -397,6 +404,7 @@ impl GitRegistry {
 /// from one commit of the cache.
 struct BranchFiles {
     url: String,
+    label: String,
     cache: PathBuf,
     git: Git,
     commit: String,
@@ -405,7 +413,7 @@ struct BranchFiles {
 
 impl RegistryFiles for BranchFiles {
     fn label(&self) -> &str {
-        &self.url
+        &self.label
     }
 
     fn is_local(&self) -> bool {

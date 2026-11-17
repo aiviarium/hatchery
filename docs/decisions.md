@@ -101,7 +101,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - A built egg on the eggs branch whose version has a tag is checked against that tag's commit too.
 - A withdrawal in `packages.kdl` on the default branch counts even when the eggs branch index does not list it.
 - The eggs branch may hold versions without a tag. They are offered as built eggs with no commit.
-- Repository addresses in `eggs.lock`, in an egg's `origin` and in error messages have their user and password removed.
+- Registry addresses in `eggs.lock`, in `.hatchery/seen.toml`, in an egg's `origin`, in listings and in error messages have their user and password removed. Only git itself is given the address as configured.
 - The git cache is `$XDG_CACHE_HOME/hatchery/git` (or `~/.cache/hatchery/git`), one folder per repository, used by one process at a time.
 
 ## Static registries

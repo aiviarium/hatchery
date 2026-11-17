@@ -147,6 +147,8 @@ fn pack_one(dir: &Path, opts: &PackOptions<'_>, wanted: impl Fn(&Egg) -> bool) -
 /// registry for its variants.
 pub struct FileSource {
     location: String,
+    /// The location without credentials, for messages.
+    label: String,
     fetch: Option<Arc<dyn Fetch>>,
     egg: Mutex<Option<Egg>>,
 }
@@ -154,8 +156,10 @@ pub struct FileSource {
 impl FileSource {
     /// The egg at `location`, a path or an `http://` or `https://` address. `fetch` is only needed for an address, and without it reading one fails.
     pub fn new(location: impl Into<String>, fetch: Option<Arc<dyn Fetch>>) -> FileSource {
+        let location = location.into();
         FileSource {
-            location: location.into(),
+            label: crate::fsx::redact_url(&location),
+            location,
             fetch,
             egg: Mutex::new(None),
         }
@@ -175,15 +179,15 @@ impl FileSource {
             let fetch = self.fetch.as_ref().ok_or_else(|| {
                 Error::other(format!(
                     "{}: reading an egg from a URL needs a Fetch, which the tool must pass",
-                    self.location
+                    self.label
                 ))
             })?;
-            let url = Url::parse(&self.location).map_err(|e| Error::invalid(&self.location, e))?;
+            let url = Url::parse(&self.location).map_err(|e| Error::invalid(&self.label, e))?;
             let bytes = fetch
                 .get(&url, None)
                 .await?
                 .ok_or_else(|| Error::NotFound {
-                    at: At::new(&self.location),
+                    at: At::new(&self.label),
                 })?;
             Egg::open(bytes)?
         } else {
@@ -193,7 +197,7 @@ impl FileSource {
         };
         if egg.variant().is_some() {
             return Err(Error::invalid(
-                &self.location,
+                &self.label,
                 "this is a variant egg; give the base egg or a fat egg",
             ));
         }
@@ -204,7 +208,7 @@ impl FileSource {
 
 impl Source for FileSource {
     fn label(&self) -> &str {
-        &self.location
+        &self.label
     }
 
     fn is_local(&self) -> bool {
@@ -222,7 +226,7 @@ impl Source for FileSource {
             if m.name() != *name {
                 return Ok(Vec::new());
             }
-            let mut offer = Offer::new(m.name(), m.version().clone(), &self.location);
+            let mut offer = Offer::new(m.name(), m.version().clone(), &self.label);
             // The checksum is of the base egg, which a fat egg contains.
             offer.sha256 = Some(egg.base()?.sha256().to_string());
             offer.details = Some(Details::from_manifest(m));
@@ -236,7 +240,7 @@ impl Source for FileSource {
             let m = egg.manifest();
             if m.name() != offer.name || *m.version() != offer.version {
                 return Err(Error::invalid(
-                    &self.location,
+                    &self.label,
                     format!(
                         "the egg is {} {}, not {} {}",
                         m.name(),
@@ -262,7 +266,7 @@ impl Source for FileSource {
                 .ok_or_else(|| Error::NotFound {
                     at: At::new(&offer.name)
                         .version(format!("{} {target}.{key}", offer.version))
-                        .registry(&self.location),
+                        .registry(&self.label),
                 })
         })
     }

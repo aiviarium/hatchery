@@ -319,17 +319,21 @@ impl RegistryFiles for DirFiles {
 
 /// The files of a registry over HTTP.
 pub struct HttpFiles {
+    /// The address files are read under, which may carry credentials.
+    base: String,
+    /// The address without credentials, for messages and records.
     label: String,
     fetch: Arc<dyn Fetch>,
     token: Option<Token>,
 }
 
 impl HttpFiles {
-    /// The files under `base`. `fetch` gets each of them, with `token` as the bearer token when there is one. A trailing `/` of `base` is dropped from the label.
+    /// The files under `base`. `fetch` gets each of them, with `token` as the bearer token when there is one. A trailing `/` of `base` is dropped, and the label is `base` without a user or password.
     pub fn new(base: Url, fetch: Arc<dyn Fetch>, token: Option<Token>) -> HttpFiles {
-        let label = base.as_str().trim_end_matches('/').to_string();
+        let base = base.as_str().trim_end_matches('/').to_string();
         HttpFiles {
-            label,
+            label: crate::fsx::redact_url(&base),
+            base,
             fetch,
             token,
         }
@@ -344,7 +348,7 @@ impl RegistryFiles for HttpFiles {
     fn read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Option<Bytes>>> {
         Box::pin(async move {
             check_path(path)?;
-            let url = Url::parse(&format!("{}/{path}", self.label))
+            let url = Url::parse(&format!("{}/{path}", self.base))
                 .map_err(|e| Error::invalid(&self.label, e))?;
             self.fetch.get(&url, self.token.as_ref()).await
         })

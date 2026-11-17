@@ -101,6 +101,7 @@ registries {
 - The lock file records the commit. If a tag later points at a different commit, Hatchery refuses to install and says so.
 - A git address is `https://`, `ssh://`, `git://`, `file://`, `host:path` or a path. Plain `http://` and remote helpers such as `ext::` are refused.
 - Access is git's own, through SSH keys, credential helpers or a token in CI. A private repository takes no Hatchery setting.
+- Hatchery shows and records a registry address without its user and password. Git itself is given the address as written, so a token in it is stored in the `.git/config` of the cached clone under the cache folder. A credential helper keeps it out of both.
 - For development, a branch works as a ref (`--ref main`), and an update resolves it again.
 - The `git` command, version 2.25 or later, must be installed where eggs are installed.
 

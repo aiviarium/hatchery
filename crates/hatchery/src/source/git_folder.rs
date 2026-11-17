@@ -12,7 +12,10 @@ use crate::source::{Details, Offer, Source};
 /// One package folder of a git repository at one ref. The repository needs
 /// no `packages.kdl`; when it has one, its defaults apply.
 pub struct GitFolder {
+    /// The address git is given, which may carry credentials.
     url: String,
+    /// The address without credentials: the label of the source.
+    label: String,
     path: Option<String>,
     git_ref: Option<String>,
     cache: PathBuf,
@@ -42,8 +45,10 @@ impl GitFolder {
         cache: impl Into<PathBuf>,
         git: Git,
     ) -> GitFolder {
+        let url = url.into();
         GitFolder {
-            url: url.into(),
+            label: crate::fsx::redact_url(&url),
+            url,
             path: path.map(|p| p.trim_end_matches('/').to_string()),
             git_ref,
             cache: cache.into(),
@@ -52,7 +57,7 @@ impl GitFolder {
     }
 
     fn shown(&self) -> String {
-        crate::fsx::redact_url(&self.url)
+        self.label.clone()
     }
 
     fn resolve(&self, remote: &Remote) -> Result<Resolved> {
@@ -119,7 +124,7 @@ impl GitFolder {
             let (m, _) = manifest_at(&cache, &commit, self.path.as_deref())?;
             (m, commit)
         };
-        let mut o = Offer::new(m.name(), m.package.version.clone(), &self.url);
+        let mut o = Offer::new(m.name(), m.package.version.clone(), &self.label);
         o.built = false;
         o.commit = Some(commit);
         o.git_ref = Some(r.name);
@@ -193,7 +198,7 @@ impl GitFolder {
 
 impl Source for GitFolder {
     fn label(&self) -> &str {
-        &self.url
+        &self.label
     }
 
     fn is_local(&self) -> bool {

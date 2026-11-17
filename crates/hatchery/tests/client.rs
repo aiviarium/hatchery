@@ -855,3 +855,55 @@ fn a_lock_entry_from_a_registry_that_no_longer_serves_its_group_is_refused() {
     assert!(matches!(err, hatchery::Error::NotFound { .. }), "{err}");
     assert!(!second.join("demo/b").exists());
 }
+
+/// A repository with `packages.kdl` and `example/alpha` 1.0.0 at tag v1.0.0.
+fn alpha_repo(repo: &Path) {
+    common::git_init(repo);
+    common::write(
+        repo,
+        "packages.kdl",
+        "format 1\ndefaults {\n  package {\n    group example\n    version \"1.0.0\"\n  }\n}\npackages {\n  find \"agents/*\"\n}\nrelease {\n  tag \"v{version}\"\n}\n",
+    );
+    common::package(
+        &repo.join("agents/alpha"),
+        "format 1\npackage {\n id alpha\n version \"1.0.0\"\n}\ntargets {\n crow {\n }\n}\n",
+        &[("crow/plugin.json", "{}")],
+    );
+    common::git_commit(repo, "1.0.0");
+    common::git(repo, &["tag", "v1.0.0"]);
+}
+
+fn git_client(env: &Env, config: &str) -> Client {
+    Client::builder()
+        .git(common::isolated_git())
+        .config(Config::parse(config).unwrap())
+        .target(crow())
+        .clock(clock())
+        .cache_dir(env.root.join("cache"))
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn credentials_in_git_addresses_stay_out_of_listings_errors_and_records() {
+    let env = Env::new();
+    let repo = env.root.join("repo");
+    alpha_repo(&repo);
+    let url = format!("file://user:s3cret@localhost{}", repo.display());
+    let client = git_client(
+        &env,
+        &format!("registries {{\n  git \"{url}\" min-age=\"3d\"\n}}\n"),
+    );
+    let dir = env.dir("p");
+    let offered = block_on(client.offered(&dir)).unwrap();
+    assert_eq!(offered.len(), 1);
+    assert!(!offered[0].registry.contains("s3cret"), "{offered:?}");
+    let err = block_on(client.add(&spec("example/alpha"), &dir)).unwrap_err();
+    assert!(matches!(err, Error::TooYoung { .. }), "{err}");
+    assert!(!format!("{err} {err:?}").contains("s3cret"), "{err:?}");
+    let err = block_on(client.add(&spec("example/nope"), &dir)).unwrap_err();
+    assert!(!format!("{err} {err:?}").contains("s3cret"), "{err:?}");
+    let seen = fs::read_to_string(dir.join(".hatchery/seen.toml")).unwrap();
+    assert!(seen.contains("file://localhost"), "{seen}");
+    assert!(!seen.contains("s3cret"), "{seen}");
+}
