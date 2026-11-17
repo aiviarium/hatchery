@@ -1,0 +1,117 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  # hatchery for each system, built on that system so that its version can be
+  # run there.
+  binary:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: hatchery-x86_64-linux.tar.gz
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: hatchery-aarch64-linux.tar.gz
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            asset: hatchery-aarch64-macos.tar.gz
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: hatchery-x86_64-macos.tar.gz
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: hatchery-x86_64-windows.zip
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The C runtime goes into the program, so that Windows needs nothing installed.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v7
+      # A tag vX.Y.Z must match the version in Cargo.toml.
+      - name: The version
+        run: |
+          want=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+            if [ "$version" != "$want" ]; then
+              echo "::error::$GITHUB_REF_NAME does not match version $want in Cargo.toml"
+              exit 1
+            fi
+          fi
+          echo "WANT_VERSION=$want" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: musl compiler
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build hatchery
+        run: cargo build --release --locked --target ${{ matrix.target }} -p hatchery-cli
+      - name: Pack
+        run: |
+          mkdir dist
+          program=hatchery
+          [ "$RUNNER_OS" = Windows ] && program=hatchery.exe
+          cp "target/${{ matrix.target }}/release/$program" LICENSE-MIT LICENSE-APACHE dist/
+          case "${{ matrix.asset }}" in
+            *.zip) (cd dist && 7z a -tzip -bso0 "../${{ matrix.asset }}" "$program" LICENSE-MIT LICENSE-APACHE) ;;
+            *) tar -czf "${{ matrix.asset }}" -C dist "$program" LICENSE-MIT LICENSE-APACHE ;;
+          esac
+          if command -v sha256sum >/dev/null; then
+            sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+          fi
+      - name: Check the version
+        run: |
+          said=$(dist/hatchery --version)
+          echo "$said"
+          [ "$said" = "hatchery $WANT_VERSION" ] || { echo "::error::$said, not hatchery $WANT_VERSION"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hatchery-${{ matrix.target }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [binary]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hatchery-*
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag such as v0.4.0-rc.1 is a pre-release.
+          prerelease=
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          # A release made on GitHub's page exists already, and only lacks the files.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes $prerelease
+          gh release upload "$GITHUB_REF_NAME" --clobber hatchery-*.tar.gz hatchery-*.tar.gz.sha256 \
+            hatchery-*.zip hatchery-*.zip.sha256

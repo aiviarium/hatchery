@@ -1,0 +1,55 @@
+extends: capitalization
+message: "Headings in sentence case: '%s'."
+level: warning
+scope: heading
+match: $sentence
+exceptions:
+  - Hatchery
+  - Rust
+  - KDL
+  - Ed25519
+  - SHA-256
+  - GitHub
+  - CI
+  - CLI
+  - API
+  - JSON
+  - HTTP
+  - HTTPS
+  - TOML
+  - SPDX
+  - JSON Schema
+  - Crow
+  - Rookery
+  - eggs.lock
+  - hatchery.kdl
+  - packages.kdl
+  - package.kdl
+  - pack
+  - inspect
+  - publish
+  - fetch
+  - add
+  - update
+  - install
+  - remove
+  - list
+  - verify
+  - withdraw
+  - keygen
+  - registry
+  - default
+  - format
+  - package
+  - about
+  - targets
+  - defaults
+  - packages
+  - release
+  - publish and tree_digest
+  - variant lines
+  - Egg
+  - Fetch
+  - Source
+  - Target
+  - Client

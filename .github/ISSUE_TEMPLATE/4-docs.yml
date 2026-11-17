@@ -1,0 +1,17 @@
+name: Documentation
+description: A page under docs/ is wrong, unclear or missing
+labels: [needs triage]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Which page
+      description: A file under docs/, or the README.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true

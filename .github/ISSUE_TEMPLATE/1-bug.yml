@@ -1,0 +1,45 @@
+name: Bug
+description: Something Hatchery does wrong, or something that used to work and doesn't any more
+type: Bug
+labels: [needs triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected and what you got. Your own words are best, even if short.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The relevant output, and the package.kdl or hatchery.kdl involved if you can share it. Take addresses, tokens and keys out first.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: hatchery --version
+      description: Or the version of the hatchery crate, if you use the library.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What you were doing
+      options:
+        - Not sure
+        - Packing a package
+        - Publishing to a registry
+        - Installing, updating or removing
+        - Using a git repository as a registry
+        - Signing or verifying
+        - Using the Rust library
+  - type: dropdown
+    id: system
+    attributes:
+      label: Where Hatchery runs
+      options:
+        - Linux
+        - macOS
+        - Windows

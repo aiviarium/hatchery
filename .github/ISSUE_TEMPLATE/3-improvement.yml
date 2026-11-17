@@ -1,0 +1,25 @@
+name: Improvement
+description: Something Hatchery does already, but could do more easily, faster or more clearly
+type: Feature
+labels: [needs triage]
+body:
+  - type: textarea
+    id: now
+    attributes:
+      label: What happens now
+      description: What you do today and what is hard about it.
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: What would be better
+      description: What you would do or see instead.
+    validations:
+      required: true
+  - type: checkboxes
+    id: work
+    attributes:
+      label: Who does it
+      options:
+        - label: I'd like to write this myself

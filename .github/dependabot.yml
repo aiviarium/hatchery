@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    labels: [dependencies]
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    labels: [dependencies]
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly

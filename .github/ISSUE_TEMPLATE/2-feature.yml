@@ -1,0 +1,43 @@
+name: Feature
+description: Something Hatchery can't do at all yet. This comes before the pull request.
+type: Feature
+labels: [needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [CONTRIBUTING.md](https://github.com/aiviarium/hatchery/blob/main/.github/CONTRIBUTING.md) first, in particular what Hatchery is and isn't. Keep one issue to one change. If Hatchery does this already but could do it better, use **Improvement**.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you ran into
+      description: The situation that made you want this, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What you propose
+      description: What Hatchery would do that it can't do now.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in and what is left out. Smaller is better.
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Could the tool that installs the package do it
+      description: Hatchery treats targets as opaque. Whatever only one tool needs belongs in that tool.
+      options:
+        - Not sure
+        - "Yes"
+        - No, it needs a change to Hatchery itself
+  - type: checkboxes
+    id: work
+    attributes:
+      label: Who does it
+      options:
+        - label: I'd like to write this myself
