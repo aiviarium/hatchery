@@ -1,0 +1,22 @@
+format 1
+
+defaults {
+  package {
+    group example
+    version "1.0.0"
+  }
+  about {
+    license MIT
+    author "example"
+    repository "https://example.org/aviary"
+  }
+}
+
+packages {
+  find "packages/*"
+}
+
+release {
+  tag "v{version}"
+  eggs branch="eggs"
+}

@@ -1,0 +1,18 @@
+format 1
+
+package {
+  id hello
+}
+
+about {
+  name "Hello"
+  summary "A package with one target and no build."
+}
+
+targets {
+  crow {
+    requires {
+      crow "^1"
+    }
+  }
+}

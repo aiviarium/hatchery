@@ -1,0 +1,33 @@
+format 1
+
+package {
+  id toolbox
+}
+
+about {
+  name "Toolbox"
+  summary "A package for two tools, with a dependency, a build and variants."
+  keywords demo variants
+}
+
+targets {
+  crow {
+    requires {
+      crow "^1"
+    }
+    dependencies {
+      hello "^1"
+    }
+  }
+  rookery {
+    build "sh build.sh"
+    requires {
+      rookery ">=0.6"
+      os linux
+    }
+    variants {
+      variant arch=x86_64
+      variant arch=aarch64
+    }
+  }
+}

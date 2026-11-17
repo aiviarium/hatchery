@@ -87,6 +87,7 @@ let report = block_on(client.add(&Spec::parse("example/hello@^0.1")?, "./plugins
 - [Registries](docs/registries.md) covers static registries, a git repository as a registry, publishing, signing and withdrawing.
 - [Command line](docs/cli.md) lists every command and flag, and shows a CI pipeline.
 - [Rust API](docs/api.md) describes the library.
+- [Playground](docs/playground.md) sets up example packages and a registry to try the command in.
 - [Decisions](docs/decisions.md) lists what the formats left open and what Hatchery chose.
 
 ## Contributing and security
