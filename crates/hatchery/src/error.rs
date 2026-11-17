@@ -99,7 +99,7 @@ pub enum Error {
 
     /// A git registry has no built egg for the version, and a wanted target
     /// needs a build.
-    #[error("{at}: no built egg, and {} need a build", targets.join(", "))]
+    #[error("{at}: no built egg, and {} a build", match targets.as_slice() { [t] => format!("target {t} needs"), ts => format!("targets {} need", ts.join(", ")) })]
     NotBuilt { at: At, targets: Vec<String> },
 
     /// A tag points at a different commit than the lock file records.
