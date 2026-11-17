@@ -536,6 +536,27 @@ impl Resolver {
         })
     }
 
+    /// Why the newest version of a package in a range was not chosen, when
+    /// `chosen` is older than it and it was skipped for a reason. For a note
+    /// to the person who asked.
+    pub async fn skipped_newer(
+        &self,
+        name: &Name,
+        range: &VersionReq,
+        chosen: &Version,
+    ) -> Result<Option<Error>> {
+        let Some((idx, offers)) = self.locate(name).await? else {
+            return Ok(None);
+        };
+        let Some(newest) = offers
+            .iter()
+            .find(|o| range.matches(&o.version) && o.version > *chosen)
+        else {
+            return Ok(None);
+        };
+        Ok(self.evaluate(idx, newest).await?.err())
+    }
+
     /// The newest version of a package in a range that is not withdrawn
     /// and not held, with no regard to requirements or variants. For
     /// fetching eggs without installing them.

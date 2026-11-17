@@ -81,12 +81,14 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - `Client::offered` takes the install folder, because it reports installed versions and reads the first-seen records there.
 - `publish` returns `Published`, which gives the file name and SHA-256 of the egg, the publish time, and whether it was signed.
 - A client may install for several targets. A package needs at least one of them. Requirements, dependencies and variants come from those targets only.
-- A base egg is unpacked whole, with the shared files of every target. Only the targets of the client are checked and locked.
+- A base egg is unpacked whole, with the shared files of every target. Only the targets of the client are checked and locked. Their folders stay in the package folder even though the lock records only the client's targets.
 
 ## Resolution and installs
 
 - The version already installed is never held back by the minimum release age, and it is not dropped because it was withdrawn. It stays, and the report warns about a withdrawn one. An update still moves to a newer version that is allowed.
 - `--allow-young` lifts the hold for the package named in the request, not for its dependencies.
+- When `add` installs an older version than the newest in the range, its report starts with a warning that gives the newest version and why it was skipped.
+- `Client::withdrawn` and `hatchery list` read the registries of the installed packages to mark withdrawn versions. A registry that cannot be read is skipped. A listing then works offline.
 - A version is skipped only for a reason it cannot be installed here. A failure to read it, such as a network or git error, stops the resolution, so that an older version is not chosen by accident.
 - A version whose newest candidates are skipped falls back to an older one. When nothing is left, the error is the reason of the newest version in range: `Withdrawn`, `Unmet`, `NoVariant`, `NotBuilt` or `TooYoung`.
 - Versions from git tags have no signed publish time, so they count from when this installation first saw them. So a new installation with a hold doesn't install a version that only has a tag until the hold has passed. Give your own repository `min-age="0d"`, or use `--allow-young`.

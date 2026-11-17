@@ -175,6 +175,8 @@ pub fn list(config: Option<&Path>, a: List) -> Res {
         return offered(&client, &a);
     }
     let installed = client.installed(&a.dir)?;
+    let withdrawn = hatchery::block_on(client.withdrawn(&a.dir))?;
+    let withdrawal = |n: &Name| withdrawn.iter().find(|(w, _)| w == n).map(|(_, w)| w);
     if a.json {
         let items: Vec<_> = installed
             .iter()
@@ -185,6 +187,7 @@ pub fn list(config: Option<&Path>, a: List) -> Res {
                     "targets": i.targets,
                     "source": source_of(&i.lock),
                     "sha256": i.sha256,
+                    "withdrawn": withdrawal(&i.name).map(|w| json!({ "reason": w.reason })),
                 })
             })
             .collect();
@@ -197,9 +200,16 @@ pub fn list(config: Option<&Path>, a: List) -> Res {
     let rows: Vec<Vec<String>> = installed
         .iter()
         .map(|i| {
+            let version = match withdrawal(&i.name) {
+                Some(w) => match &w.reason {
+                    Some(r) => format!("{} (withdrawn: {r})", i.version),
+                    None => format!("{} (withdrawn)", i.version),
+                },
+                None => i.version.to_string(),
+            };
             vec![
                 i.name.to_string(),
-                i.version.to_string(),
+                version,
                 i.targets.join(","),
                 source_of(&i.lock),
             ]

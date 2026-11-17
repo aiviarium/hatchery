@@ -126,7 +126,7 @@ Leave out the `pack` and `publish` step to see what a missing build looks like. 
 | Try | What happens |
 | --- | --- |
 | Add `min-age="3d"` to the line in `hatchery.kdl`, then `add` into a new folder | Versions are held, and `list --offered` shows until when. `--allow-young` installs anyway |
-| Add `withdrawn toolbox "1.1.0"` to `release` in `aviary/packages.kdl`, commit and push | 1.1.0 is skipped when resolving. Where it is installed it stays, and `update` warns about it |
+| Add `withdrawn toolbox "1.1.0"` to `release` in `aviary/packages.kdl`, commit and push | 1.1.0 is skipped when resolving. Where it is installed it stays, `list` marks it `(withdrawn)`, and `update` warns about it |
 | Move a tag: `git -C aviary tag -f v1.1.0 && git -C aviary push -f origin v1.1.0` after a new commit | An install from a lock that has the old commit is refused |
 | Change `key=` in `hatchery.kdl` to another public key from `hatchery keygen` | The eggs of `toolbox` are refused, because their signature does not match. `hello` still installs, from its tag, because the line allows unsigned tags |
 | Remove `unsigned-tags=#true` from the line in `hatchery.kdl` | `hello` is refused, because it has only a tag and the registry requires signed eggs. `toolbox` still installs for `rookery` from its signed egg. For `crow` it needs `hello`, so it fails too |

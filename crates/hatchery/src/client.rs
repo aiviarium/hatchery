@@ -1357,10 +1357,24 @@ impl Client {
             resolver.allow_young(root.clone());
         }
         let mut roots = Constraints::new();
-        roots.insert(root, vec![("request".to_string(), range)]);
+        roots.insert(root.clone(), vec![("request".to_string(), range.clone())]);
         let plan = resolver.resolve(roots).await;
         resolver.save_seen(dir)?;
-        self.apply(dir, lock, &resolver, plan?).await
+        let plan = plan?;
+        // A newer release that was passed over is named, so that an older
+        // version is not installed without a word.
+        let note = match plan.picks.get(&root) {
+            Some(pick) => resolver
+                .skipped_newer(&root, &range, &pick.offer.version)
+                .await?
+                .map(|why| format!("skipped {why}; installed {} instead", pick.offer.version)),
+            None => None,
+        };
+        let mut report = self.apply(dir, lock, &resolver, plan).await?;
+        if let Some(n) = note {
+            report.warnings.insert(0, n);
+        }
+        Ok(report)
     }
 
     /// Updates one package, or all, to the newest allowed versions.
@@ -1563,6 +1577,34 @@ impl Client {
         unpacked.remove(name);
         unpacked.save(dir)?;
         lock.save(dir)
+    }
+
+    /// The installed packages of `dir` whose installed version their
+    /// registry has withdrawn since, with the publisher's reason. A registry
+    /// that cannot be read is left out, so a listing works offline.
+    pub async fn withdrawn(&self, dir: &Path) -> Result<Vec<(Name, Withdrawn)>> {
+        let mut out = Vec::new();
+        for i in self.installed(dir)? {
+            let Some(idx) = i
+                .lock
+                .registry
+                .as_deref()
+                .and_then(|label| self.registry_index(label))
+            else {
+                continue;
+            };
+            let Ok(offers) = self.registries[idx].source.versions(&i.name).await else {
+                continue;
+            };
+            if let Some(w) = offers
+                .into_iter()
+                .find(|o| o.version == i.version)
+                .and_then(|o| o.withdrawn)
+            {
+                out.push((i.name, w));
+            }
+        }
+        Ok(out)
     }
 
     /// The packages `eggs.lock` lists in `dir`, each with its manifest. A package whose folder has no `package.kdl` is left out.

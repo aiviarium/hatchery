@@ -22,7 +22,7 @@ Unpacking refuses `..`, absolute paths, symlinks and hardlinks. It also refuses 
 
 A target is a tool that installs packages, such as `crow` or `rookery`. It is also the name of the content a package has for that tool.
 
-Hatchery treats the name as opaque. A tool reads its own target and never sees the others. A package folder keeps each target's files in a folder of the same name, so `crow` reads `crow/`.
+Hatchery treats the name as opaque. A tool reads its own target. Hatchery checks, locks and fetches variants only for the targets of the tool that installs. The base egg is unpacked whole, so an install folder also contains the shared files of the package's other targets, in their own folders. A package folder keeps each target's files in a folder of the same name, so `crow` reads `crow/`.
 
 Hatchery reads nothing in a target's folder except what the manifest names. The target's own manifest, such as `plugin.json`, belongs to the tool.
 

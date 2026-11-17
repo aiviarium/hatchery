@@ -137,6 +137,10 @@ Resolves, verifies, unpacks and locks a package and its dependencies.
 
 Without `--on-demand`, the variant for this machine's OS and architecture is installed.
 
+When a newer version in the range cannot be installed here, `add` installs the newest one that can. It then prints a warning with the newer version and the reason, such as a missing built egg or a withdrawal.
+
+The base egg is unpacked whole, so the shared files of the package's other targets are in the folder too. Only the targets of `--target` are checked, locked and given their variants.
+
 ```bash
 hatchery add aiviarium/claude@^1.4 --target crow --fact crow=1.2.0 --dir ./plugins
 hatchery add --git https://github.com/aiviarium/parrot.git --path agents/claude --ref v1.4.0 --target rookery
@@ -156,7 +160,7 @@ Updates one package, or all, to the newest allowed versions.
 hatchery install [--dir DIR] [--target NAME]… [--fact NAME=VALUE]… [--on-demand]
 ```
 
-Installs exactly what `eggs.lock` lists, and checks checksums and commits. Packages already installed at the locked version are left alone.
+Installs exactly what `eggs.lock` lists, and checks checksums and commits. A package is left alone when its folder already contains the locked version, unpacked from the locked egg.
 
 ## remove
 
@@ -172,7 +176,11 @@ Removes a package. It refuses while another installed package depends on it.
 hatchery list [--dir DIR] [--offered] [--json]
 ```
 
-Lists installed packages with version, targets and source. With `--offered`, lists what the registries offer. Each row has the newest version, the installed version, the version an update would install and the time a held version becomes installable. `--target` and `--fact` also work here, so that requirements are checked.
+Lists installed packages with version, targets and source. The version is the one in the package's folder. A version its registry has withdrawn since is marked `(withdrawn)`, with the reason when there is one, so `list` reads the registries. A registry it cannot read is skipped.
+
+With `--offered`, lists what the registries offer. Each row has the newest version, the installed version, the version an update would install and the time a held version becomes installable. A withdrawn version is marked `(withdrawn)`. A package a registry had to skip, such as one whose `package.kdl` does not parse, is a warning. `--target` and `--fact` also work here, so that requirements are checked.
+
+With `--json`, an installed package has a `withdrawn` field, `null` or `{"reason": …}`.
 
 ## verify
 

@@ -1189,3 +1189,36 @@ fn install_from_the_lock_of_a_branch_installs_the_locked_commit() {
     let report = block_on(client.update(None, &dir)).unwrap();
     assert_eq!(report.packages[0].version, Version::new(1, 1, 0));
 }
+
+#[test]
+fn a_withdrawn_installed_version_is_listed_and_a_skipped_release_is_named() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "b", "1.0.0", &[], false);
+    publish(&env.reg(), &env.work(), "b", "1.1.0", &[], false);
+    let first = env.dir("first");
+    block_on(env.client().add(&spec("demo/b"), &first)).unwrap();
+    assert!(block_on(env.client().withdrawn(&first)).unwrap().is_empty());
+    hatchery::publish::withdraw_dir(
+        &env.reg(),
+        &name("demo/b"),
+        &Version::new(1, 1, 0),
+        Some("broken"),
+    )
+    .unwrap();
+    let withdrawn = block_on(env.client().withdrawn(&first)).unwrap();
+    assert_eq!(withdrawn.len(), 1);
+    assert_eq!(withdrawn[0].0, name("demo/b"));
+    assert_eq!(withdrawn[0].1.reason.as_deref(), Some("broken"));
+
+    // Without a version, the older release is installed, and the newer one
+    // is named with the reason it was skipped.
+    let second = env.dir("second");
+    let report = block_on(env.client().add(&spec("demo/b"), &second)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 0, 0));
+    let note = &report.warnings[0];
+    assert!(
+        note.contains("skipped demo/b 1.1.0") && note.contains("withdrawn"),
+        "{note}"
+    );
+    assert!(note.ends_with("installed 1.0.0 instead"), "{note}");
+}

@@ -1,7 +1,9 @@
 //! Hatchery packs package folders into eggs, publishes them, resolves
 //! versions, verifies and installs. A package carries content for several
-//! tools (targets); each tool installs its own target and never sees the
-//! others.
+//! tools (targets). Each tool reads its own target's folder, and Hatchery
+//! checks, locks and fetches variants only for the client's targets. The
+//! base egg is unpacked whole, so the shared files of the other targets are
+//! in the package folder too.
 //!
 //! The surface is one [`Client`], one trait per extension point
 //! ([`Target`], [`Source`], [`Fetch`]) and plain data types.
