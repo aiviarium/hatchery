@@ -632,7 +632,10 @@ impl Client {
     }
 
     /// The source that installed a locked package.
-    fn lock_source(&self, lp: &LockedPackage) -> Result<LockSource> {
+    /// With `exact`, a package of one git folder at a branch is read at the
+    /// locked commit, which the branch may have left since. Without it, the
+    /// branch is followed, as an update does.
+    fn lock_source(&self, lp: &LockedPackage, exact: bool) -> Result<LockSource> {
         if let Some(label) = &lp.registry {
             let idx = self.registry_index(label).ok_or_else(|| {
                 Error::invalid(
@@ -649,8 +652,15 @@ impl Client {
         }
         if let Some(recorded) = &lp.git {
             let url = &self.full_git_url(recorded);
+            let mut read_at = lp.git_ref.clone();
+            if exact
+                && let Some(commit) = &lp.commit
+                && !matches!(&lp.git_ref, Some(r) if self.is_tag(url, r)?)
+            {
+                read_at = Some(commit.clone());
+            }
             return Ok(LockSource::Single(
-                self.git_folder(url, lp.path.clone(), lp.git_ref.clone()),
+                self.git_folder(url, lp.path.clone(), read_at),
                 Origin::Git {
                     url: url.clone(),
                     path: lp.path.clone(),
@@ -1382,7 +1392,7 @@ impl Client {
                 }
                 continue;
             }
-            let idx = match self.lock_source(lp) {
+            let idx = match self.lock_source(lp, false) {
                 Ok(LockSource::Registry(i)) => i,
                 Ok(LockSource::Single(source, origin)) => {
                     resolver.add_source(SourceEntry::single(source, origin))
@@ -1484,7 +1494,7 @@ impl Client {
                 ));
                 continue;
             }
-            let ls = self.lock_source(lp)?;
+            let ls = self.lock_source(lp, true)?;
             let (source, origin) = self.source_of(&ls);
             let offer = self.lock_offer(&ls, &source, lp).await?;
             if let Some(w) = &offer.withdrawn {
@@ -1607,7 +1617,7 @@ impl Client {
             return Ok(folder);
         }
 
-        let ls = self.lock_source(&lp)?;
+        let ls = self.lock_source(&lp, true)?;
         let (source, origin) = self.source_of(&ls);
         let offer = self.lock_offer(&ls, &source, &lp).await?;
         let pinned = !matches!(origin, Origin::Folder { .. });

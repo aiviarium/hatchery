@@ -1160,3 +1160,32 @@ fn install_installs_a_lock_that_changed() {
         "{}"
     );
 }
+
+#[test]
+fn install_from_the_lock_of_a_branch_installs_the_locked_commit() {
+    let env = Env::new();
+    let repo = Repo::new(&env);
+    repo.put("agents/alpha", "alpha", "1.0.0");
+    common::git_commit(&repo.dir, "1.0.0");
+    let client = git_client(&env, "");
+    let branch = Spec::git(repo.url(), Some("agents/alpha".into()), Some("main".into()));
+    let dir = env.dir("p");
+    block_on(client.add(&branch, &dir)).unwrap();
+
+    // The branch moves on to another version.
+    repo.put("agents/alpha", "alpha", "1.1.0");
+    common::git_commit(&repo.dir, "1.1.0");
+    let fresh = env.dir("fresh");
+    fs::create_dir_all(&fresh).unwrap();
+    fs::copy(dir.join("eggs.lock"), fresh.join("eggs.lock")).unwrap();
+    let report = block_on(client.install(&fresh)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 0, 0));
+    assert_eq!(plugin(&fresh, "example/alpha"), "{\"v\":\"1.0.0\"}");
+    assert_eq!(
+        fs::read_to_string(fresh.join("eggs.lock")).unwrap(),
+        fs::read_to_string(dir.join("eggs.lock")).unwrap()
+    );
+    // An update follows the branch.
+    let report = block_on(client.update(None, &dir)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 1, 0));
+}
