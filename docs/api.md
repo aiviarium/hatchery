@@ -4,7 +4,7 @@ The `hatchery` crate is one `Client`, one trait for each extension point, and pl
 
 ```toml
 [dependencies]
-hatchery = { version = "0.1", features = ["http"] }
+hatchery = { git = "https://github.com/aiviarium/hatchery", tag = "v0.1.0", features = ["http"] }
 ```
 
 | Feature | Adds |

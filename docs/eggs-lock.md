@@ -4,14 +4,14 @@
 
 ```toml
 [[package]]
-name    = "aiviarium/claude"
-version = "1.4.0"
-targets = ["rookery"]
-git     = "https://github.com/aiviarium/parrot.git"
-path    = "agents/claude"
-ref     = "v1.4.0"
-commit  = "4be1c0d…"
-sha256  = "9f2c…"
+name     = "aiviarium/claude"
+version  = "1.4.0"
+targets  = ["rookery"]
+registry = "https://github.com/aiviarium/parrot.git"
+path     = "agents/claude"
+ref      = "v1.4.0"
+commit   = "4be1c0d…"
+sha256   = "9f2c…"
 
 [package.variants]
 "rookery.x86_64" = "51ab…"
@@ -22,7 +22,8 @@ sha256  = "9f2c…"
 | `name`, `version` | The package and the installed version |
 | `targets` | The targets installed from it |
 | `registry` | The address of a static or git registry it came from |
-| `git`, `path`, `ref`, `commit` | The repository, the package's folder, the tag or branch, and the commit. For a git registry and for one git folder |
+| `git` | The repository of one git folder, installed with `--git`. A git registry sets `registry` instead |
+| `path`, `ref`, `commit` | The package's folder, the tag or branch, and the commit. For a git registry and for one git folder |
 | `file`, `folder` | The egg file or address, or the package folder, it was installed from |
 | `sha256` | The base egg's checksum |
 | `variants` | The variant eggs fetched so far, as `"<target>.<key>" = sha256` |

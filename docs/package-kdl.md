@@ -26,7 +26,7 @@ about {
 }
 
 targets {
-  crow {
+  crow manifest="plugin.json" {
     build "bun run build:crow"
     requires {
       crow "^1"
@@ -55,6 +55,7 @@ claude/
   package.kdl
   README.md
   icon.svg
+  CHANGELOG.md
   crow/
     plugin.json
     host.js
