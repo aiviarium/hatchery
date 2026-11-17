@@ -12,6 +12,7 @@ use crate::config::{Config, RegistryConfig};
 use crate::egg::Egg;
 use crate::error::{At, Error, IoContext, Result};
 use crate::fetch::{Fetch, Token, Url};
+use crate::fsx::redact_url;
 use crate::git::Git;
 use crate::lock::{Lock, LockedPackage};
 use crate::manifest::{self, About, Manifest};
@@ -20,6 +21,7 @@ use crate::platform::{Platform, Variants};
 use crate::resolve::{Constraints, InstalledPkg, Origin, Pick, Plan, Resolver, SourceEntry, at_of};
 use crate::seen::Seen;
 use crate::sign;
+use crate::source::Details;
 use crate::source::{
     FileSource, FolderSource, GitFolder, GitRegistry, Offer, Source, StaticRegistry, Withdrawn,
 };
@@ -274,6 +276,14 @@ pub struct Client {
     registries: Vec<Registry>,
 }
 
+/// Holds `<dir>/.hatchery/lock` so that two runs on one install folder do
+/// not lose each other's lock updates.
+fn lock_dir(dir: &Path) -> Result<crate::git::FileLock> {
+    let folder = dir.join(crate::seen::DIR);
+    fs::create_dir_all(&folder).at_path(&folder)?;
+    crate::git::lock_path(&folder.join("lock"))
+}
+
 /// How many of the newest versions of a package a listing looks into for
 /// problems; the rest are listed without checking.
 const CHECKED_VERSIONS: usize = 5;
@@ -373,13 +383,13 @@ impl Prepared {
             variants: self.variants.clone(),
         };
         match &self.origin {
-            Origin::Registry => l.registry = Some(self.label.clone()),
+            Origin::Registry => l.registry = Some(redact_url(&self.label)),
             Origin::Git { url, path, git_ref } => {
-                l.git = Some(url.clone());
+                l.git = Some(redact_url(url));
                 l.path = l.path.take().or_else(|| path.clone());
                 l.git_ref = l.git_ref.take().or_else(|| git_ref.clone());
             }
-            Origin::File { location } => l.file = Some(location.clone()),
+            Origin::File { location } => l.file = Some(redact_url(location)),
             Origin::Folder { path } => l.folder = Some(path.clone()),
         }
         l
@@ -490,23 +500,54 @@ impl Client {
     fn registry_index(&self, label: &str) -> Option<usize> {
         self.registries
             .iter()
-            .position(|r| r.source.label() == label)
+            .position(|r| redact_url(r.source.label()) == redact_url(label))
+    }
+
+    /// The address to use for a git URL the lock holds without credentials:
+    /// the configured git registry's own, which may carry them.
+    fn full_git_url(&self, recorded: &str) -> String {
+        self.registries
+            .iter()
+            .find(|r| r.config.kind == "git" && redact_url(&r.config.location) == recorded)
+            .map(|r| r.config.location.clone())
+            .unwrap_or_else(|| recorded.to_string())
+    }
+
+    /// The git address a lock entry's source reads, if it is a git one.
+    fn lock_git_url(&self, ls: &LockSource) -> Option<String> {
+        match ls {
+            LockSource::Registry(i) => {
+                let r = &self.registries[*i];
+                (r.config.kind == "git").then(|| r.config.location.clone())
+            }
+            LockSource::Single(_, Origin::Git { url, .. }) => Some(url.clone()),
+            _ => None,
+        }
+    }
+
+    /// Whether a ref of a repository is a tag, which must not move.
+    fn is_tag(&self, url: &str, git_ref: &str) -> Result<bool> {
+        Ok(self.git.ls_remote(url)?.tags.contains_key(git_ref))
     }
 
     /// The source that installed a locked package.
     fn lock_source(&self, lp: &LockedPackage) -> Result<LockSource> {
         if let Some(label) = &lp.registry {
-            return self
-                .registry_index(label)
-                .map(LockSource::Registry)
-                .ok_or_else(|| {
-                    Error::invalid(
-                        crate::lock::FILE,
-                        format!("{}: the registry {label} is not configured", lp.name),
-                    )
+            let idx = self.registry_index(label).ok_or_else(|| {
+                Error::invalid(
+                    crate::lock::FILE,
+                    format!("{}: the registry {label} is not configured", lp.name),
+                )
+            })?;
+            if !self.registries[idx].config.serves(&lp.name.group) {
+                return Err(Error::NotFound {
+                    at: At::new(&lp.name).registry(label),
                 });
+            }
+            return Ok(LockSource::Registry(idx));
         }
-        if let Some(url) = &lp.git {
+        if let Some(recorded) = &lp.git {
+            let url = &self.full_git_url(recorded);
             return Ok(LockSource::Single(
                 self.git_folder(url, lp.path.clone(), lp.git_ref.clone()),
                 Origin::Git {
@@ -550,7 +591,27 @@ impl Client {
 
     /// The offer a lock entry names, with the locked commit set so that the
     /// source refuses a tag that moved.
-    async fn lock_offer(&self, source: &Arc<dyn Source>, lp: &LockedPackage) -> Result<Offer> {
+    async fn lock_offer(
+        &self,
+        ls: &LockSource,
+        source: &Arc<dyn Source>,
+        lp: &LockedPackage,
+    ) -> Result<Offer> {
+        // A tag that moved is reported as that even when its version changed too.
+        if let (Some(url), Some(tag), Some(locked)) =
+            (self.lock_git_url(ls), &lp.git_ref, &lp.commit)
+            && let Some(now) = self.git.ls_remote(&url)?.tags.get(tag)
+            && now != locked
+        {
+            return Err(Error::TagMoved {
+                at: At::new(&lp.name)
+                    .version(&lp.version)
+                    .registry(redact_url(source.label())),
+                tag: tag.clone(),
+                locked: locked.clone(),
+                now: now.clone(),
+            });
+        }
         let offers = source.versions(&lp.name).await?;
         let mut offer = offers
             .into_iter()
@@ -573,6 +634,7 @@ impl Client {
         resolver: &mut Resolver,
         source: Arc<dyn Source>,
         origin: Origin,
+        expected: Option<&Name>,
     ) -> Result<(Name, VersionReq)> {
         let name = source
             .names()
@@ -580,8 +642,16 @@ impl Client {
             .into_iter()
             .next()
             .ok_or_else(|| Error::NotFound {
-                at: At::new(source.label()),
+                at: At::new(redact_url(source.label())),
             })?;
+        if let Some(want) = expected
+            && *want != name
+        {
+            return Err(Error::invalid(
+                redact_url(source.label()),
+                format!("the folder holds {name}, not {want}"),
+            ));
+        }
         let idx = resolver.add_source(SourceEntry::single(source, origin));
         resolver.pin(name.clone(), idx);
         Ok((name, VersionReq::STAR))
@@ -637,7 +707,9 @@ impl Client {
                 path,
                 git_ref: Some(git_ref.to_string()),
             };
-            let (name, _) = self.single_root(resolver, source, origin).await?;
+            let (name, _) = self
+                .single_root(resolver, source, origin, Some(&name))
+                .await?;
             return Ok((name, w.range()));
         }
         Err(Error::NotFound {
@@ -668,7 +740,7 @@ impl Client {
                     path: path.clone(),
                     git_ref: git_ref.clone(),
                 };
-                self.single_root(resolver, source, origin).await
+                self.single_root(resolver, source, origin, None).await
             }
             Spec::Folder(p) => {
                 let source: Arc<dyn Source> =
@@ -677,7 +749,7 @@ impl Client {
                 let origin = Origin::Folder {
                     path: abs.display().to_string(),
                 };
-                self.single_root(resolver, source, origin).await
+                self.single_root(resolver, source, origin, None).await
             }
             Spec::File(f) => {
                 let source: Arc<dyn Source> =
@@ -685,7 +757,7 @@ impl Client {
                 let origin = Origin::File {
                     location: f.clone(),
                 };
-                self.single_root(resolver, source, origin).await
+                self.single_root(resolver, source, origin, None).await
             }
         }
     }
@@ -700,8 +772,11 @@ impl Client {
         offer: &Offer,
         wanted: &[String],
         expected: Option<&LockedPackage>,
+        index: Option<&Details>,
     ) -> Result<Prepared> {
         let at = at_of(offer);
+        // A folder is packed again each time, so its checksum is not a pin.
+        let pinned = !matches!(origin, Origin::Folder { .. });
         let egg = source.fetch(offer).await?;
         let m = egg.manifest();
         if m.name() != offer.name || *m.version() != offer.version {
@@ -716,6 +791,7 @@ impl Client {
             egg.sha256().to_string()
         };
         if let Some(l) = expected
+            && pinned
             && l.sha256 != base_sha
         {
             return Err(Error::ChecksumMismatch {
@@ -743,6 +819,34 @@ impl Client {
             let spec = m
                 .target(tname)
                 .ok_or_else(|| Error::invalid(&at, format!("the egg has no target {tname}")))?;
+            // Resolution used the index, which the signature does not cover.
+            if let Some(info) = index.and_then(|d| d.target(tname)) {
+                let from_egg = |ds: &[manifest::Dependency]| {
+                    let mut v: Vec<(Name, String)> = ds
+                        .iter()
+                        .map(|d| (d.name(&m.package.group), d.range.to_string()))
+                        .collect();
+                    v.sort();
+                    v
+                };
+                let from_index = |ds: &[(Name, VersionReq)]| {
+                    let mut v: Vec<(Name, String)> =
+                        ds.iter().map(|(n, r)| (n.clone(), r.to_string())).collect();
+                    v.sort();
+                    v
+                };
+                if from_egg(&spec.dependencies) != from_index(&info.dependencies)
+                    || from_egg(&spec.optional_dependencies)
+                        != from_index(&info.optional_dependencies)
+                {
+                    return Err(Error::invalid(
+                        &at,
+                        format!(
+                            "the index does not match the egg: the dependencies of {tname} differ"
+                        ),
+                    ));
+                }
+            }
             if let Some((req, found)) = target::unmet(target.as_ref(), &spec.requires) {
                 return Err(Error::Unmet {
                     at,
@@ -797,7 +901,7 @@ impl Client {
                         a
                     }
                 };
-                if &actual != sha {
+                if pinned && &actual != sha {
                     return Err(Error::ChecksumMismatch {
                         at: at_of(offer).version(format!("{} {id}", offer.version)),
                         expected: sha.clone(),
@@ -844,6 +948,7 @@ impl Client {
                 // An install from the lock keeps what the lock says of the source.
                 let mut kept = old.clone();
                 kept.variants = entry.variants;
+                kept.sha256 = entry.sha256;
                 entry = kept;
             }
             lock.set(entry);
@@ -853,31 +958,46 @@ impl Client {
                 name: p.name,
                 version: p.offer.version.clone(),
                 sha256: p.base_sha,
-                registry: p.offer.registry.clone(),
+                registry: redact_url(&p.offer.registry),
                 egg: p.egg,
             });
         }
         Ok(changes)
     }
 
-    /// A registry package at the same version whose commit is no longer the
-    /// locked one.
-    fn check_moved(
+    /// A package whose tag points at another commit than the locked one:
+    /// a registry's tag at the same version, or the tag of a single git
+    /// folder. Branches may move.
+    async fn check_moved(
         &self,
         lock: &Lock,
         resolver: &Resolver,
         name: &Name,
         pick: &Pick,
     ) -> Result<()> {
-        if !resolver.source(pick.source).is_registry() {
+        let Some(l) = lock.get(name) else {
+            return Ok(());
+        };
+        let (Some(locked), Some(now)) = (&l.commit, &pick.offer.commit) else {
+            return Ok(());
+        };
+        if locked == now {
             return Ok(());
         }
-        if let Some(l) = lock.get(name)
-            && l.version == pick.offer.version
-            && let Some(locked) = &l.commit
-            && let Some(now) = &pick.offer.commit
-            && locked != now
-        {
+        let moved = match &resolver.source(pick.source).origin {
+            Origin::Registry => l.version == pick.offer.version,
+            Origin::Git { url, git_ref, .. } => {
+                let r = pick.offer.git_ref.clone().or_else(|| git_ref.clone());
+                l.git.as_deref().map(redact_url) == Some(redact_url(url))
+                    && l.git_ref == r
+                    && match &r {
+                        Some(r) => self.is_tag(url, r)?,
+                        None => false,
+                    }
+            }
+            _ => false,
+        };
+        if moved {
             return Err(Error::TagMoved {
                 at: at_of(&pick.offer),
                 tag: pick
@@ -890,6 +1010,25 @@ impl Client {
             });
         }
         Ok(())
+    }
+
+    /// Whether the lock already holds exactly this version from this source,
+    /// at the same commit: it stays as it is and is not fetched again.
+    fn is_installed(dir: &Path, lock: &Lock, origin: &Origin, label: &str, offer: &Offer) -> bool {
+        let Some(l) = lock.get(&offer.name) else {
+            return false;
+        };
+        let same_source = match origin {
+            Origin::Registry => l.registry.as_deref().map(redact_url) == Some(redact_url(label)),
+            Origin::Git { url, .. } => {
+                offer.commit.is_some() && l.git.as_deref().map(redact_url) == Some(redact_url(url))
+            }
+            _ => false,
+        };
+        same_source
+            && l.version == offer.version
+            && l.commit == offer.commit
+            && dir.join(offer.name.dir()).join(manifest::FILE).is_file()
     }
 
     /// Notes for installed versions that are now withdrawn.
@@ -931,12 +1070,18 @@ impl Client {
             .map(|p| (p.name.clone(), p.version.clone()))
             .collect();
         for (name, pick) in &plan.picks {
-            self.check_moved(&lock, resolver, name, pick)?;
+            self.check_moved(&lock, resolver, name, pick).await?;
         }
-        let warnings = self.withdrawn_notes(resolver, &lock, &plan).await;
+        let mut warnings = self.withdrawn_notes(resolver, &lock, &plan).await;
         let mut prepared = Vec::new();
         for pick in plan.picks.values() {
             let entry = resolver.source(pick.source);
+            if Client::is_installed(dir, &lock, &entry.origin, entry.source.label(), &pick.offer) {
+                if let Some(w) = &pick.offer.withdrawn {
+                    warnings.push(withdrawn_note(&pick.offer.name, &pick.offer.version, w));
+                }
+                continue;
+            }
             prepared.push(
                 self.prepare(
                     &entry.source,
@@ -944,6 +1089,7 @@ impl Client {
                     &pick.offer,
                     &pick.targets,
                     None,
+                    Some(&pick.details),
                 )
                 .await?,
             );
@@ -1050,6 +1196,7 @@ impl Client {
 
     pub async fn add_with(&self, spec: &Spec, dir: &Path, opts: &Options) -> Result<Report> {
         self.need_targets()?;
+        let _guard = lock_dir(dir)?;
         let lock = Lock::load(dir)?;
         let installed = self.read_installed(dir, &lock)?;
         let mut resolver = self.new_resolver(Seen::load(dir)?, &installed);
@@ -1068,6 +1215,7 @@ impl Client {
     /// Updates one package, or all, to the newest allowed versions.
     pub async fn update(&self, name: Option<&Name>, dir: &Path) -> Result<Report> {
         self.need_targets()?;
+        let _guard = lock_dir(dir)?;
         let lock = Lock::load(dir)?;
         let installed = self.read_installed(dir, &lock)?;
         let mut resolver = self.new_resolver(Seen::load(dir)?, &installed);
@@ -1146,14 +1294,8 @@ impl Client {
 
         let plan = resolver.resolve(roots).await;
         resolver.save_seen(dir)?;
-        let mut plan = plan?;
-        // The same version at the same commit is no change. A moved tag of a
-        // registry is refused when the plan is applied.
-        plan.picks.retain(|n, pick| {
-            !lock
-                .get(n)
-                .is_some_and(|l| l.version == pick.offer.version && l.commit == pick.offer.commit)
-        });
+        let plan = plan?;
+        // The same version at the same commit stays, and is not fetched again.
         let mut report = self.apply(dir, lock, &resolver, plan).await?;
         notes.append(&mut report.warnings);
         report.warnings = notes;
@@ -1164,6 +1306,7 @@ impl Client {
     /// commits. Packages already installed at the locked version are left.
     pub async fn install(&self, dir: &Path) -> Result<Report> {
         self.need_targets()?;
+        let _guard = lock_dir(dir)?;
         let mut lock = Lock::load(dir)?;
         let installed = self.read_installed(dir, &lock)?;
         let previous: BTreeMap<Name, Version> = installed
@@ -1190,15 +1333,22 @@ impl Client {
                 ));
                 continue;
             }
-            let (source, origin) = self.source_of(&self.lock_source(lp)?);
-            let offer = self.lock_offer(&source, lp).await?;
+            let ls = self.lock_source(lp)?;
+            let (source, origin) = self.source_of(&ls);
+            let offer = self.lock_offer(&ls, &source, lp).await?;
             if let Some(w) = &offer.withdrawn {
                 warnings.push(withdrawn_note(&lp.name, &lp.version, w));
             }
-            prepared.push(
-                self.prepare(&source, &origin, &offer, &wanted, Some(lp))
-                    .await?,
-            );
+            let p = self
+                .prepare(&source, &origin, &offer, &wanted, Some(lp), None)
+                .await?;
+            if matches!(origin, Origin::Folder { .. }) && p.base_sha != lp.sha256 {
+                warnings.push(format!(
+                    "{}: the folder was packed again and its checksum changed",
+                    lp.name
+                ));
+            }
+            prepared.push(p);
         }
         let packages = self.write(dir, &mut lock, prepared, &previous, true)?;
         Ok(Report {
@@ -1210,6 +1360,7 @@ impl Client {
 
     /// Removes a package. Refuses while a dependent is installed.
     pub fn remove(&self, name: &Name, dir: &Path) -> Result<()> {
+        let _guard = lock_dir(dir)?;
         let mut lock = Lock::load(dir)?;
         if lock.get(name).is_none() {
             return Err(Error::NotFound { at: At::new(name) });
@@ -1290,6 +1441,7 @@ impl Client {
             .parent()
             .and_then(Path::parent)
             .ok_or_else(|| Error::invalid(pkg.dir.display(), "not a package folder"))?;
+        let _guard = lock_dir(dir)?;
         let mut lock = Lock::load(dir)?;
         let mut lp = lock
             .get(&pkg.name)
@@ -1299,10 +1451,21 @@ impl Client {
             return Ok(folder);
         }
 
-        let (source, _) = self.source_of(&self.lock_source(&lp)?);
-        let offer = self.lock_offer(&source, &lp).await?;
+        let ls = self.lock_source(&lp)?;
+        let (source, origin) = self.source_of(&ls);
+        let offer = self.lock_offer(&ls, &source, &lp).await?;
+        let pinned = !matches!(origin, Origin::Folder { .. });
         let from_fat = if lp.file.is_some() {
-            source.fetch(&offer).await?.embedded_variant(&tname, &key)?
+            let fat = source.fetch(&offer).await?;
+            let base = fat.base()?;
+            if base.sha256() != lp.sha256 {
+                return Err(Error::ChecksumMismatch {
+                    at: at_of(&offer),
+                    expected: lp.sha256.clone(),
+                    actual: base.sha256().to_string(),
+                });
+            }
+            fat.embedded_variant(&tname, &key)?
         } else {
             None
         };
@@ -1311,6 +1474,16 @@ impl Client {
             None => source.fetch_variant(&offer, &tname, &key).await?,
         };
         check_variant(&offer, &tname, &key, &egg)?;
+        if pinned
+            && let Some(sha) = lp.variants.get(&id)
+            && sha != egg.sha256()
+        {
+            return Err(Error::ChecksumMismatch {
+                at: at_of(&offer).version(format!("{} {id}", offer.version)),
+                expected: sha.clone(),
+                actual: egg.sha256().to_string(),
+            });
+        }
         egg.unpack(&pkg.dir)?;
         lp.variants.insert(id, egg.sha256().to_string());
         lock.set(lp);
@@ -1326,6 +1499,8 @@ impl Client {
         variants: Option<&[String]>,
         opts: &Options,
     ) -> Result<Fetched> {
+        // With no install folder there is no first-seen history, so the age of a
+        // version rests on its signed `published` time (tags count from now).
         let mut resolver = self.new_resolver(Seen::default(), &[]);
         let (name, range) = self.root_of(&mut resolver, spec).await?;
         if opts.allow_young {

@@ -59,7 +59,7 @@ fn print_report(r: &Report) {
             Some(p) if *p != c.version => {
                 println!("updated {} {p} -> {} ({})", c.name, c.version, c.registry)
             }
-            Some(_) => println!("kept {} {} ({})", c.name, c.version, c.registry),
+            Some(_) => println!("reinstalled {} {} ({})", c.name, c.version, c.registry),
             None => println!("installed {} {} ({})", c.name, c.version, c.registry),
         }
     }

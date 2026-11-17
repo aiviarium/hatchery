@@ -149,9 +149,144 @@ fn add_installs_dependencies_first_and_writes_the_lock() {
     assert_eq!(installed[0].sha256, report.packages[1].sha256);
 
     // The id alone works when one group has it.
+    publish(&env.reg(), &env.work(), "a", "1.1.0", &[("b", "^1")], false);
     let again = block_on(env.client().add(&spec("a"), &dir)).unwrap();
     assert_eq!(again.packages.len(), 1);
     assert_eq!(again.packages[0].previous, Some(Version::new(1, 0, 0)));
+}
+
+#[test]
+fn the_installed_version_is_not_fetched_again() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "a", "1.0.0", &[], false);
+    let dir = env.dir("p");
+    let client = env.client();
+    block_on(client.add(&spec("demo/a@1.0.0"), &dir)).unwrap();
+    let lock = fs::read_to_string(dir.join("eggs.lock")).unwrap();
+    let installed = fs::read(dir.join("demo/a/package.kdl")).unwrap();
+
+    // The registry now serves other bytes under the same version.
+    let egg_path = env.reg().join("demo/a/a-1.0.0.egg");
+    let mut bytes = fs::read(&egg_path).unwrap();
+    bytes.extend_from_slice(b"other");
+    fs::write(&egg_path, bytes).unwrap();
+
+    let report = block_on(client.add(&spec("demo/a@1.0.0"), &dir)).unwrap();
+    assert!(report.packages.is_empty());
+    assert_eq!(fs::read_to_string(dir.join("eggs.lock")).unwrap(), lock);
+    assert_eq!(fs::read(dir.join("demo/a/package.kdl")).unwrap(), installed);
+}
+
+#[test]
+fn an_installed_version_that_is_withdrawn_stays_and_warns() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "a", "1.0.0", &[], false);
+    publish(&env.reg(), &env.work(), "a", "1.1.0", &[], false);
+    let dir = env.dir("p");
+    let client = env.client();
+    block_on(client.add(&spec("demo/a"), &dir)).unwrap();
+    hatchery::publish::withdraw_dir(
+        &env.reg(),
+        &name("demo/a"),
+        &Version::new(1, 1, 0),
+        Some("broken"),
+    )
+    .unwrap();
+
+    let report = block_on(client.update(None, &dir)).unwrap();
+    assert!(report.packages.is_empty());
+    assert!(
+        report.warnings.iter().any(|w| w.contains("withdrawn")),
+        "{:?}",
+        report.warnings
+    );
+    assert_eq!(
+        client.installed(&dir).unwrap()[0].version,
+        Version::new(1, 1, 0)
+    );
+
+    publish(&env.reg(), &env.work(), "a", "1.2.0", &[], false);
+    let report = block_on(client.update(None, &dir)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 2, 0));
+}
+
+#[test]
+fn an_index_that_disagrees_with_the_egg_is_refused() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "b", "1.0.0", &[], false);
+    publish(&env.reg(), &env.work(), "a", "1.0.0", &[("b", "^1")], false);
+    let path = env.reg().join("demo/a/index.json");
+    let mut json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    json["versions"]["1.0.0"]["targets"]["crow"]["dependencies"] = serde_json::json!({});
+    fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+    let dir = env.dir("p");
+    let err = block_on(env.client().add(&spec("demo/a"), &dir)).unwrap_err();
+    assert!(err.to_string().contains("index does not match"), "{err}");
+    assert!(!dir.join("demo").exists());
+}
+
+#[test]
+fn a_folder_can_be_installed_again_from_the_lock() {
+    let env = Env::new();
+    let src = env.work().join("dev");
+    common::package(
+        &src,
+        &manifest("dev", "0.1.0", &[], false),
+        &[("crow/plugin.json", "{}")],
+    );
+    let client = Client::builder()
+        .target(crow())
+        .clock(clock())
+        .cache_dir(env.root.join("cache"))
+        .build()
+        .unwrap();
+    let first = env.dir("first");
+    block_on(client.add(&Spec::Folder(src.clone()), &first)).unwrap();
+    // Change the folder's content: the checksum is not a pin for folders.
+    fs::write(src.join("crow/plugin.json"), "{\"changed\":true}").unwrap();
+    let second = env.dir("second");
+    fs::create_dir_all(&second).unwrap();
+    fs::copy(first.join("eggs.lock"), second.join("eggs.lock")).unwrap();
+    let report = block_on(client.install(&second)).unwrap();
+    assert_eq!(report.packages.len(), 1);
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("checksum changed")),
+        "{:?}",
+        report.warnings
+    );
+    let lock = fs::read_to_string(second.join("eggs.lock")).unwrap();
+    assert!(lock.contains(report.packages[0].sha256.as_str()));
+}
+
+#[test]
+fn a_variant_that_differs_from_the_lock_is_refused() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "v", "1.0.0", &[], true);
+    let client = client_for(
+        &env.reg(),
+        &env.root.join("cache"),
+        StaticTarget::new("rookery").variants(Variants::OnDemand),
+        "",
+    );
+    let dir = env.dir("p");
+    block_on(client.add(&spec("demo/v"), &dir)).unwrap();
+    let pkg = client.installed(&dir).unwrap().remove(0);
+    let plat = Platform::new("linux", "x86_64");
+    let folder = block_on(client.variant(&pkg, &plat)).unwrap();
+    let lock = fs::read_to_string(dir.join("eggs.lock")).unwrap();
+    let sha = lock
+        .lines()
+        .find_map(|l| l.strip_prefix("\"rookery.x86_64\" = \""))
+        .unwrap()
+        .trim_end_matches('"')
+        .to_string();
+    fs::write(dir.join("eggs.lock"), lock.replace(&sha, &"0".repeat(64))).unwrap();
+    fs::remove_dir_all(&folder).unwrap();
+    let err = block_on(client.variant(&pkg, &plat)).unwrap_err();
+    assert!(matches!(err, Error::ChecksumMismatch { .. }), "{err}");
 }
 
 #[test]
@@ -614,4 +749,96 @@ fn a_git_registry_pins_commits_and_refuses_a_moved_tag() {
 
     let err = block_on(build().add(&spec("example/alpha"), &dir)).unwrap_err();
     assert!(matches!(err, Error::TagMoved { .. }), "{err}");
+}
+
+#[test]
+fn credentials_in_git_addresses_stay_out_of_the_lock() {
+    let env = Env::new();
+    let repo = env.root.join("repo");
+    common::git_init(&repo);
+    common::write(
+        &repo,
+        "packages.kdl",
+        "format 1\ndefaults {\n  package {\n    group example\n    version \"1.0.0\"\n  }\n}\npackages {\n  find \"agents/*\"\n}\nrelease {\n  tag \"v{version}\"\n}\n",
+    );
+    common::package(
+        &repo.join("agents/alpha"),
+        "format 1\npackage {\n id alpha\n version \"1.0.0\"\n}\ntargets {\n crow {\n }\n}\n",
+        &[("crow/plugin.json", "{}")],
+    );
+    common::git_commit(&repo, "1.0.0");
+    common::git(&repo, &["tag", "v1.0.0"]);
+
+    let url = format!("file://user:s3cret@localhost{}", repo.display());
+    let config = Config::parse(&format!("registries {{\n  git \"{url}\"\n}}\n")).unwrap();
+    let build = || {
+        Client::builder()
+            .config(config.clone())
+            .target(crow())
+            .clock(clock())
+            .cache_dir(env.root.join("cache"))
+            .build()
+            .unwrap()
+    };
+    let dir = env.dir("p");
+    block_on(build().add(&spec("example/alpha"), &dir)).unwrap();
+    let lock = fs::read_to_string(dir.join("eggs.lock")).unwrap();
+    assert!(!lock.contains("s3cret"), "{lock}");
+    // The entry still finds its registry.
+    let fresh = env.dir("fresh");
+    fs::create_dir_all(&fresh).unwrap();
+    fs::copy(dir.join("eggs.lock"), fresh.join("eggs.lock")).unwrap();
+    block_on(build().install(&fresh)).unwrap();
+
+    // A single git folder at a tag: the tag moving is refused on update.
+    let dir2 = env.dir("p2");
+    let client = Client::builder()
+        .target(crow())
+        .clock(clock())
+        .cache_dir(env.root.join("cache"))
+        .build()
+        .unwrap();
+    let spec = Spec::git(
+        repo.display().to_string(),
+        Some("agents/alpha".to_string()),
+        Some("v1.0.0".to_string()),
+    );
+    block_on(client.add(&spec, &dir2)).unwrap();
+    common::write(&repo, "agents/alpha/crow/plugin.json", "{\"moved\":true}");
+    common::git_commit(&repo, "move");
+    common::git(&repo, &["tag", "-f", "v1.0.0"]);
+    let err = block_on(client.update(None, &dir2)).unwrap_err();
+    assert!(matches!(err, Error::TagMoved { .. }), "{err}");
+    let fresh2 = env.dir("fresh2");
+    fs::create_dir_all(&fresh2).unwrap();
+    fs::copy(dir2.join("eggs.lock"), fresh2.join("eggs.lock")).unwrap();
+    let err = block_on(client.install(&fresh2)).unwrap_err();
+    assert!(matches!(err, Error::TagMoved { .. }), "{err}");
+}
+
+#[test]
+fn a_lock_entry_from_a_registry_that_no_longer_serves_its_group_is_refused() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "b", "1.0.0", &[], false);
+    let first = env.dir("first");
+    block_on(env.client().add(&spec("demo/b"), &first)).unwrap();
+
+    let second = env.dir("second");
+    fs::create_dir_all(&second).unwrap();
+    fs::copy(first.join("eggs.lock"), second.join("eggs.lock")).unwrap();
+    let config = Config::parse(&format!(
+        "registries {{\n  dir \"{}\" only=\"other\"\n}}\n",
+        env.reg().display()
+    ))
+    .unwrap();
+    let client = Client::builder()
+        .config(config)
+        .target(crow())
+        .clock(clock())
+        .cache_dir(env.root.join("cache"))
+        .build()
+        .unwrap();
+    let err = block_on(client.install(&second)).unwrap_err();
+    assert!(matches!(err, hatchery::Error::NotFound { .. }), "{err}");
+    assert!(!second.join("demo/b").exists());
 }

@@ -412,7 +412,14 @@ impl Resolver {
 
     /// Runs every filter on one offer.
     async fn evaluate(&self, idx: usize, offer: &Offer) -> std::result::Result<Pick, Error> {
-        if let Some(w) = &offer.withdrawn {
+        // An installed version that was withdrawn stays; the caller warns.
+        let installed_here = self
+            .installed
+            .get(&offer.name)
+            .is_some_and(|i| i.version == offer.version);
+        if let Some(w) = &offer.withdrawn
+            && !installed_here
+        {
             return Err(Error::Withdrawn {
                 at: at_of(offer),
                 reason: w.reason.clone(),
