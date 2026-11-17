@@ -3,10 +3,9 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::digest::sha256_hex;
 use crate::egg::Egg;
@@ -17,9 +16,6 @@ use crate::time::Timestamp;
 
 /// How long to wait for another user of a cache folder.
 const LOCK_WAIT: Duration = Duration::from_secs(60);
-/// A lock file not written for this long is left over from a process that
-/// died.
-const LOCK_STALE: Duration = Duration::from_secs(30 * 60);
 
 /// How to run git.
 #[derive(Debug, Clone)]
@@ -258,85 +254,44 @@ fn parse_ls_remote(text: &str) -> Remote {
     r
 }
 
-/// A lock held through a file, released when dropped. Another process
-/// waits for it; a lock whose file has not been written for a long time is
-/// taken over.
+/// A lock on a file, released when dropped or when the process dies. The
+/// operating system holds it, so a run that was killed leaves nothing
+/// behind to wait for. The file itself stays: removing it would let two
+/// processes lock two different files at one path.
 #[derive(Debug)]
 pub(crate) struct FileLock {
-    path: PathBuf,
-    nonce: String,
+    _file: fs::File,
 }
 
-/// Takes the lock file at `path`, waiting up to a minute for its holder.
+/// Takes the lock on the file at `path`, creating it when needed and waiting
+/// up to a minute for its holder.
 pub(crate) fn lock_path(path: &Path) -> Result<FileLock> {
+    lock_path_within(path, LOCK_WAIT)
+}
+
+fn lock_path_within(path: &Path, wait: Duration) -> Result<FileLock> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .at_path(path)?;
     let start = std::time::Instant::now();
-    let nonce = format!("{}\n", crate::fsx::nonce());
     loop {
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-        {
-            Ok(mut f) => {
-                use std::io::Write;
-                if let Err(e) = f.write_all(nonce.as_bytes()) {
-                    let _ = fs::remove_file(path);
-                    return Err(e).at_path(path);
-                }
-                return Ok(FileLock {
-                    path: path.to_path_buf(),
-                    nonce,
-                });
-            }
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                if is_stale(path) {
-                    take_over(path);
-                    continue;
-                }
-                if start.elapsed() > LOCK_WAIT {
+        match file.try_lock() {
+            Ok(()) => return Ok(FileLock { _file: file }),
+            Err(fs::TryLockError::WouldBlock) => {
+                if start.elapsed() >= wait {
                     return Err(Error::other(format!(
                         "{}: still locked by another process after {}s",
                         path.display(),
-                        LOCK_WAIT.as_secs()
+                        wait.as_secs()
                     )));
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(e) => return Err(e).at_path(path),
-        }
-    }
-}
-
-fn is_stale(path: &Path) -> bool {
-    fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .is_some_and(|age| age > LOCK_STALE)
-}
-
-/// Moves a stale lock file away under a name of its own. Of several
-/// processes that try, one rename succeeds. If what was moved turns out to
-/// be fresh (another process took over first), it is put back.
-fn take_over(path: &Path) {
-    let moved = path.with_extension(format!("stale-{}", crate::fsx::nonce()));
-    if fs::rename(path, &moved).is_err() {
-        return;
-    }
-    if !is_stale(&moved) {
-        // Put a fresh lock back; if the path is taken again already, its
-        // holder only loses the exclusion.
-        let _ = fs::hard_link(&moved, path);
-    }
-    let _ = fs::remove_file(&moved);
-}
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        // Only a lock file that is still ours: after a take-over the path
-        // belongs to someone else.
-        if fs::read_to_string(&self.path).is_ok_and(|c| c == self.nonce) {
-            let _ = fs::remove_file(&self.path);
+            Err(fs::TryLockError::Error(e)) => return Err(e).at_path(path),
         }
     }
 }
@@ -717,6 +672,56 @@ mod tests {
         assert_eq!(r.branches.len(), 2);
         assert_eq!(r.tags["v1.0.0"], "ccc");
         assert_eq!(r.tags["v2.0.0"], "eee");
+    }
+
+    const HOLDER_ENV: &str = "HATCHERY_TEST_LOCK_HOLDER";
+
+    /// Not a test of its own: the next test runs it in a child process, which
+    /// takes the lock named by the environment and then waits to be killed.
+    #[test]
+    fn lock_holder() {
+        let Some(path) = std::env::var_os(HOLDER_ENV) else {
+            return;
+        };
+        let _lock = lock_path(Path::new(&path)).unwrap();
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        writeln!(out, "locked").unwrap();
+        out.flush().unwrap();
+        std::thread::sleep(Duration::from_secs(120));
+    }
+
+    #[test]
+    fn a_killed_process_releases_its_lock() {
+        use std::io::{BufRead, BufReader};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.lock");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "git::tests::lock_holder", "--nocapture"])
+            .env(HOLDER_ENV, &path)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        while lines.next().unwrap().unwrap() != "locked" {}
+        assert!(lock_path_within(&path, Duration::from_millis(200)).is_err());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let start = std::time::Instant::now();
+        lock_path_within(&path, Duration::from_secs(5)).unwrap();
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_second_lock_waits_for_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.lock");
+        let first = lock_path(&path).unwrap();
+        let err = lock_path_within(&path, Duration::from_millis(150)).unwrap_err();
+        assert!(err.to_string().contains("still locked"), "{err}");
+        drop(first);
+        lock_path_within(&path, Duration::from_millis(150)).unwrap();
+        assert!(path.exists(), "the lock file stays");
     }
 
     #[test]
