@@ -1008,6 +1008,33 @@ fn addresses_and_refs_that_look_like_options_are_refused() {
 }
 
 #[test]
+fn remote_helpers_and_plain_http_are_refused() {
+    let f = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let marker = tmp.path().join("PWNED");
+    let ext = format!("ext::sh -c touch% {}", marker.display());
+    let g = Git::new();
+
+    assert!(matches!(
+        g.ls_remote(&ext).unwrap_err(),
+        Error::Invalid { .. }
+    ));
+    assert!(g.cache(&f.cache, &ext).is_err());
+    let reg = GitRegistry::new(&ext, &f.cache, Git::new(), None);
+    assert!(block_on(reg.names()).is_err());
+    let egg = built_alpha(tmp.path(), "1.0.0");
+    assert!(publish_branch(&egg, &ext, "eggs", None, None, now(), &g).is_err());
+    for url in ["http://127.0.0.1:1/x.git", "fd::17", "ftp://example.org/x"] {
+        assert!(g.ls_remote(url).is_err(), "{url}");
+    }
+
+    // Git itself refuses the helper too, were an address to get past the check.
+    let err = g.run(None, &["ls-remote", "--", &ext]).unwrap_err();
+    assert!(err.to_string().contains("not allowed"), "{err}");
+    assert!(!marker.exists());
+}
+
+#[test]
 fn credentials_in_addresses_do_not_reach_eggs_or_messages() {
     let f = Fixture::new();
     let secret = "https://ci:ghp_SECRET@127.0.0.1:1/x.git";

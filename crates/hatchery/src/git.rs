@@ -17,6 +17,11 @@ use crate::time::Timestamp;
 /// How long to wait for another user of a cache folder.
 const LOCK_WAIT: Duration = Duration::from_secs(60);
 
+/// The transports of git that Hatchery uses: web, ssh, the git protocol and
+/// local repositories. The address of a plain path or of `host:path` is
+/// `ssh` or `file`.
+const ALLOWED_SCHEMES: [&str; 4] = ["https", "ssh", "git", "file"];
+
 /// How to run git.
 #[derive(Debug, Clone)]
 pub struct Git {
@@ -82,8 +87,14 @@ impl Git {
         env: &[(&str, &str)],
     ) -> Command {
         let mut cmd = Command::new(&self.program);
-        // Local repositories are remotes in tests and in some set-ups.
-        cmd.args(["-c", "protocol.file.allow=always"]);
+        // Only the transports an address may name. Git would run a helper
+        // program for `ext::` and `fd::` addresses, also inside a submodule
+        // or a redirect.
+        cmd.args(["-c", "protocol.allow=never"]);
+        for name in ALLOWED_SCHEMES {
+            cmd.args(["-c", &format!("protocol.{name}.allow=always")]);
+        }
+        cmd.env("GIT_PROTOCOL_FROM_USER", "0");
         cmd.args(["-c", "advice.detachedHead=false"]);
         for c in config {
             cmd.args(["-c", c]);
@@ -168,14 +179,39 @@ impl Git {
     }
 }
 
-/// Refuses an address git would take for an option, or that holds control
-/// characters.
+/// Refuses an address git would take for an option, that holds control
+/// characters, or that names a transport other than `https://`, `ssh://`,
+/// `git://` and `file://`. A `host:path` address of ssh and a path of a local
+/// repository are fine. A remote helper such as `ext::sh -c ...` is not.
 pub(crate) fn check_url(url: &str) -> Result<()> {
+    let refuse = |why: &str| Error::invalid(crate::fsx::redact_url(url), why);
     if url.is_empty() || url.starts_with('-') || url.chars().any(char::is_control) {
-        return Err(Error::invalid(
-            crate::fsx::redact_url(url),
-            "is not a valid git address",
+        return Err(refuse("is not a valid git address"));
+    }
+    // `<transport>::<address>`, which git hands to `git-remote-<transport>`.
+    if let Some((helper, _)) = url.split_once("::")
+        && !helper.is_empty()
+        && helper
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+    {
+        return Err(refuse(
+            "uses a remote helper, which is not allowed in a git address",
         ));
+    }
+    if let Some((scheme, _)) = url.split_once("://") {
+        let plain = scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+        if plain
+            && !ALLOWED_SCHEMES
+                .iter()
+                .any(|a| scheme.eq_ignore_ascii_case(a))
+        {
+            return Err(refuse(
+                "is not allowed: use https://, ssh://, git://, file://, host:path or a path",
+            ));
+        }
     }
     Ok(())
 }
@@ -937,6 +973,52 @@ mod tests {
         assert_eq!(e[2].kind, "commit");
         assert_eq!(e[3].path, "weird\nname");
         assert!(parse_ls_tree(b"").is_empty());
+    }
+
+    #[test]
+    fn check_url_allows_the_usual_addresses() {
+        for ok in [
+            "https://example.org/x.git",
+            "HTTPS://example.org/x.git",
+            "https://user:token@example.org/x.git",
+            "ssh://git@example.org/x.git",
+            "ssh://git@[::1]:22/x.git",
+            "git://example.org/x.git",
+            "file:///srv/x.git",
+            "git@example.org:x/y.git",
+            "example.org:x/y.git",
+            "git@[::1]:x/y.git",
+            "/srv/x.git",
+            "../x.git",
+            "x.git",
+            r"C:\repos\x.git",
+            "C:/repos/x.git",
+        ] {
+            assert!(check_url(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn check_url_refuses_helpers_other_transports_and_options() {
+        for bad in [
+            "",
+            "-x",
+            "--upload-pack=touch x",
+            "ext::sh -c touch% /tmp/x",
+            "fd::17",
+            "foo::bar",
+            "http://example.org/x.git",
+            "ftp://example.org/x.git",
+            "git+ssh://example.org/x.git",
+            "ext://example.org/x.git",
+            "https://example.org/\nx.git",
+        ] {
+            let err = check_url(bad).unwrap_err();
+            assert!(matches!(err, Error::Invalid { .. }), "{bad}");
+        }
+        let err = check_url("http://user:secret@example.org/x.git").unwrap_err();
+        assert!(!err.to_string().contains("secret"), "{err}");
+        assert!(err.to_string().contains("example.org"), "{err}");
     }
 
     #[test]
