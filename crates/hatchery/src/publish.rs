@@ -56,7 +56,15 @@ pub fn publish_at(
 ) -> Result<Published> {
     match to {
         PublishTo::Dir(dir) => publish_dir(egg, dir, key, now),
-        PublishTo::Git { .. } => Err(Error::other("publishing to git is not available yet")),
+        PublishTo::Git { url, branch, path } => crate::source::git::publish_branch(
+            egg,
+            url,
+            branch,
+            path.as_deref(),
+            key,
+            now,
+            &crate::git::Git::default(),
+        ),
     }
 }
 
