@@ -14,7 +14,7 @@ use crate::error::{At, Error, IoContext, Result};
 use crate::fetch::{Fetch, Token, Url};
 use crate::fsx::redact_url;
 use crate::git::Git;
-use crate::lock::{Lock, LockedPackage};
+use crate::lock::{Lock, LockedPackage, Unpacked};
 use crate::manifest::{self, About, Manifest};
 use crate::name::{Name, Spec, Wanted};
 use crate::platform::{Platform, Variants};
@@ -237,9 +237,11 @@ pub struct Change {
 pub struct Installed {
     /// The package.
     pub name: Name,
-    /// The installed version, from `eggs.lock`.
+    /// The installed version, from the `package.kdl` in its folder. It can
+    /// differ from the lock's until `install` runs.
     pub version: Version,
-    /// The SHA-256 of the base egg that was installed, from `eggs.lock`.
+    /// The SHA-256 of the base egg the folder was unpacked from, as
+    /// `.hatchery/unpacked.toml` records it. The lock's when there is no record.
     pub sha256: String,
     /// The client's targets that were installed from the package.
     pub targets: Vec<String>,
@@ -496,6 +498,7 @@ impl Client {
     /// The installed packages of a folder, from the lock and each
     /// package's `package.kdl`. A lock entry whose folder is gone is left out.
     fn read_installed(&self, dir: &Path, lock: &Lock) -> Result<Vec<Installed>> {
+        let unpacked = Unpacked::load(dir);
         let mut out = Vec::new();
         for lp in &lock.packages {
             let pkg_dir = dir.join(lp.name.dir());
@@ -509,10 +512,15 @@ impl Client {
                 Error::Invalid { message, .. } => Error::invalid(path.display(), message),
                 e => e,
             })?;
+            // What is in the folder, which differs from the lock when
+            // the lock was changed and not installed yet.
             out.push(Installed {
                 name: lp.name.clone(),
-                version: lp.version.clone(),
-                sha256: lp.sha256.clone(),
+                version: manifest.package.version.clone(),
+                sha256: unpacked
+                    .get(&lp.name)
+                    .unwrap_or(lp.sha256.as_str())
+                    .to_string(),
                 targets: lp.targets.clone(),
                 dir: pkg_dir,
                 manifest,
@@ -1015,13 +1023,20 @@ impl Client {
         keep_lock_entry: bool,
     ) -> Result<Vec<Change>> {
         fs::create_dir_all(dir).at_path(dir)?;
+        let mut unpacked = Unpacked::load(dir);
         let mut changes = Vec::new();
         for p in order(prepared) {
             let pkg_dir = dir.join(p.name.dir());
+            // Forgotten first, so that a folder left half written is
+            // unpacked again by the next install.
+            unpacked.remove(&p.name);
+            unpacked.save(dir)?;
             p.egg.unpack(&pkg_dir)?;
             for ve in &p.variant_eggs {
                 ve.unpack(&pkg_dir)?;
             }
+            unpacked.set(&p.name, &p.base_sha);
+            unpacked.save(dir)?;
             let mut entry = p.locked();
             if keep_lock_entry && let Some(old) = lock.get(&p.name) {
                 // An install from the lock keeps what the lock says of the source.
@@ -1108,6 +1123,7 @@ impl Client {
             && l.version == offer.version
             && l.commit == offer.commit
             && dir.join(offer.name.dir()).join(manifest::FILE).is_file()
+            && Unpacked::load(dir).get(&offer.name) == Some(l.sha256.as_str())
     }
 
     /// Notes for installed versions that are now withdrawn.
@@ -1401,10 +1417,20 @@ impl Client {
             .iter()
             .map(|i| (i.name.clone(), i.version.clone()))
             .collect();
+        let installed_sha: BTreeMap<&Name, &str> = installed
+            .iter()
+            .map(|i| (&i.name, i.sha256.as_str()))
+            .collect();
+        let unpacked = Unpacked::load(dir);
         let mut warnings = Vec::new();
         let mut prepared = Vec::new();
         for lp in &lock.packages {
-            if previous.get(&lp.name) == Some(&lp.version) {
+            // Left as it is only when the folder holds the locked version,
+            // unpacked from the locked egg.
+            if previous.get(&lp.name) == Some(&lp.version)
+                && unpacked.get(&lp.name).is_some()
+                && installed_sha.get(&lp.name) == Some(&lp.sha256.as_str())
+            {
                 continue;
             }
             let wanted: Vec<String> = self
@@ -1486,6 +1512,9 @@ impl Client {
             Err(e) => return Err(e).at_path(&pkg_dir),
         }
         lock.remove(name);
+        let mut unpacked = Unpacked::load(dir);
+        unpacked.remove(name);
+        unpacked.save(dir)?;
         lock.save(dir)
     }
 

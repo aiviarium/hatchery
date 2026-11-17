@@ -105,6 +105,58 @@ impl Lock {
     }
 }
 
+/// The base egg each package folder was unpacked from, kept in
+/// `.hatchery/unpacked.toml`. `install` compares it with the lock, because
+/// the lock says what should be installed and the folder may hold something
+/// older.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct Unpacked {
+    #[serde(default = "format_one")]
+    format: u32,
+    /// `group/id` to the SHA-256 of the base egg.
+    #[serde(default)]
+    packages: BTreeMap<String, String>,
+}
+
+fn format_one() -> u32 {
+    1
+}
+
+impl Unpacked {
+    const FILE: &'static str = "unpacked.toml";
+
+    fn path(dir: &Path) -> std::path::PathBuf {
+        dir.join(crate::seen::DIR).join(Self::FILE)
+    }
+
+    /// The records of an install folder. None of them when the file is
+    /// missing or does not parse: a package is then unpacked again.
+    pub(crate) fn load(dir: &Path) -> Unpacked {
+        std::fs::read_to_string(Self::path(dir))
+            .ok()
+            .and_then(|t| toml::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn save(&self, dir: &Path) -> Result<()> {
+        let text = toml::to_string(self)
+            .map_err(|e| Error::invalid(Self::FILE, format!("cannot write: {e}")))?;
+        write_atomic(&Self::path(dir), text.as_bytes())
+    }
+
+    pub(crate) fn get(&self, name: &Name) -> Option<&str> {
+        self.packages.get(&name.to_string()).map(String::as_str)
+    }
+
+    pub(crate) fn set(&mut self, name: &Name, sha256: &str) {
+        self.packages.insert(name.to_string(), sha256.to_string());
+    }
+
+    pub(crate) fn remove(&mut self, name: &Name) {
+        self.packages.remove(&name.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

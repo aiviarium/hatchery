@@ -32,7 +32,7 @@ Keys that do not apply are left out. Packages are sorted by name.
 
 ## Using the lock
 
-- `hatchery install` installs exactly what the lock lists, and checks checksums and commits.
+- `hatchery install` installs exactly what the lock lists, and checks checksums and commits. It skips a package only when its folder contains the locked version, unpacked from the egg with the locked checksum. So `install` applies a lock that changed, such as after a pull from version control.
 - If a tag later points at a different commit, Hatchery refuses to install and says so.
 - Installs from the lock are not held by the minimum release age.
 - `hatchery update` resolves again and rewrites the entries it changes.
@@ -44,8 +44,11 @@ Keys that do not apply are left out. Packages are sorted by name.
 <dir>/<group>/<id>/                          the unpacked base egg
 <dir>/<group>/<id>/<target>/variants/<key>/  each variant that was fetched
 <dir>/.hatchery/seen.toml                    when each version was first seen in each registry
+<dir>/.hatchery/unpacked.toml                the checksum of the base egg each package folder was unpacked from
 ```
 
-`seen.toml` backs the minimum release age. Keep it with the install folder.
+`seen.toml` backs the minimum release age. Keep it with the install folder. `unpacked.toml` tells `install` what each folder contains. Without it, `install` unpacks every package again.
+
+`hatchery list` shows the version in each package's own `package.kdl`, which is what is installed. It can differ from the lock until `install` runs.
 
 To compare an installed package with a copy elsewhere, `hatchery::tree_digest` gives a checksum of a folder's files. It covers the paths, the executable bit of each file and the contents.

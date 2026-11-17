@@ -1114,3 +1114,49 @@ fn a_shared_tag_counts_only_for_packages_at_that_version() {
         assert_eq!(o.versions.len(), 1, "{o:?}");
     }
 }
+
+#[test]
+fn install_installs_a_lock_that_changed() {
+    let env = Env::new();
+    publish(&env.reg(), &env.work(), "b", "1.0.0", &[], false);
+    publish(&env.reg(), &env.work(), "b", "1.1.0", &[], false);
+    let (old, new) = (env.dir("old"), env.dir("new"));
+    block_on(env.client().add(&spec("demo/b@1.0.0"), &old)).unwrap();
+    block_on(env.client().add(&spec("demo/b@1.1.0"), &new)).unwrap();
+
+    // The lock of a newer version, say from version control.
+    fs::copy(new.join("eggs.lock"), old.join("eggs.lock")).unwrap();
+    let listed = env.client().installed(&old).unwrap();
+    assert_eq!(listed[0].version, Version::new(1, 0, 0));
+    let report = block_on(env.client().install(&old)).unwrap();
+    assert_eq!(report.packages.len(), 1, "{report:?}");
+    assert_eq!(report.packages[0].previous, Some(Version::new(1, 0, 0)));
+    assert_eq!(report.packages[0].version, Version::new(1, 1, 0));
+    assert_eq!(
+        env.client().installed(&old).unwrap()[0].version,
+        Version::new(1, 1, 0)
+    );
+    assert_eq!(
+        tree_digest(&old.join("demo/b")).unwrap(),
+        tree_digest(&new.join("demo/b")).unwrap()
+    );
+    // Now it is what the lock says, and nothing changes.
+    let again = block_on(env.client().install(&old)).unwrap();
+    assert!(again.packages.is_empty(), "{again:?}");
+
+    // A folder that holds another egg of the same version is unpacked again.
+    fs::write(old.join("demo/b/crow/plugin.json"), "changed").unwrap();
+    let records = old.join(".hatchery/unpacked.toml");
+    let text = fs::read_to_string(&records).unwrap();
+    fs::write(
+        &records,
+        text.replace(&report.packages[0].sha256, &"0".repeat(64)),
+    )
+    .unwrap();
+    let report = block_on(env.client().install(&old)).unwrap();
+    assert_eq!(report.packages.len(), 1);
+    assert_eq!(
+        fs::read_to_string(old.join("demo/b/crow/plugin.json")).unwrap(),
+        "{}"
+    );
+}
