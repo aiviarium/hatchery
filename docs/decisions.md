@@ -67,3 +67,42 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - `keygen` prints the signing key on the first line and the public key on the second.
 - `verify --registry` compares the egg with the package index it finds in a static registry: its checksum, and with `--key` its signature.
 - `registry add` writes `./hatchery.kdl` when no configuration file is found. If `HATCHERY_CONFIG` points at a file that does not exist yet, `registry add` creates it and other commands read an empty configuration.
+
+## The Rust API
+
+- The traits return `BoxFuture` instead of using `async fn`, so that `Source` and `Fetch` can be trait objects without a macro crate. A source or fetcher writes `Box::pin(async move { … })`.
+- `Fetch::get` returns `Result<Option<Bytes>>`. `None` is a 404.
+- `Source` has more than `versions` and `fetch`: `label`, `is_local`, `names` for listings and for an id given alone, `details` for an offer that comes without its targets (a git tag), and `fetch_variant`.
+- `Client::offered` takes the install folder, because it reports installed versions and reads the first-seen records there.
+- `publish` returns `Published`, which gives the file name and SHA-256 of the egg, the publish time, and whether it was signed.
+- A client may install for several targets. A package needs at least one of them. Requirements, dependencies and variants come from those targets only.
+- A base egg is unpacked whole, with the shared files of every target. Only the targets of the client are checked and locked.
+
+## Resolution and installs
+
+- The version already installed is never held back by the minimum release age, and it is not dropped because it was withdrawn. It stays, and the report warns about a withdrawn one. An update still moves to a newer version that is allowed.
+- `--allow-young` lifts the hold for the package named in the request, not for its dependencies.
+- A version whose newest candidates are skipped falls back to an older one. When nothing is left, the error is the reason of the newest version in range: `Withdrawn`, `Unmet`, `NoVariant`, `NotBuilt` or `TooYoung`.
+- Versions from git tags have no signed publish time, so they count from when this installation first saw them. So a new installation with a hold doesn't install a version that only has a tag until the hold has passed. Give your own repository `min-age="0d"`, or use `--allow-young`.
+- The backdating guard counts per registry and package. Versions in the first listing of a package count from their signed time. A version that appears later counts from the later of its signed time and when it was first seen.
+- A registry given as a local path or a `file://` URL is local, and is not held by default.
+- An installed package keeps the version it has when `add` names that version again. It is not fetched a second time.
+- Updating a package replaces its folder, so variants that were fetched on demand are fetched again when needed.
+- `install` from the lock checks each egg against the locked SHA-256. A package installed from a folder is packed again and its new SHA-256 is recorded, because you chose that folder.
+- After fetching an egg, the client compares the dependencies in the egg with those in the index it resolved from. An index that differs from its egg is an error, because the signature covers only the egg's bytes.
+- The client holds a lock on `<dir>/.hatchery/lock` while it changes the folder.
+
+## Git repositories
+
+- A tag that points at another commit than the one recorded is refused, for a git registry and for one git folder alike. A branch may move: `update` installs its new commit, and `install` from the lock fetches the locked commit by its id.
+- A built egg on the eggs branch whose version has a tag is checked against that tag's commit too.
+- A withdrawal in `packages.kdl` on the default branch counts even when the eggs branch index does not list it.
+- The eggs branch may hold versions without a tag. They are offered as built eggs with no commit.
+- Repository addresses in `eggs.lock`, in an egg's `origin` and in error messages have their user and password removed.
+- The git cache is `$XDG_CACHE_HOME/hatchery/git` (or `~/.cache/hatchery/git`), one folder per repository, used by one process at a time.
+
+## Static registries
+
+- `requires` is a JSON object, so the order of a target's requirement lines is not kept in the index.
+- A package is added to the root `index.json` when its base egg is first published, not when only a variant egg is.
+- Publishing a base egg again replaces `about` in the package index with the egg's. Unknown keys are kept.
