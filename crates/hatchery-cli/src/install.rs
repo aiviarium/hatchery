@@ -12,7 +12,7 @@ use crate::args::{Add, Fetch, Install, List, Remove, Source, Tools, Update};
 use crate::registry::load;
 use crate::{Fail, Res, io, table};
 
-fn client(config: Option<&Path>, tools: &Tools) -> Res<Client> {
+fn client(config: Option<&Path>, tools: &Tools, on_demand: bool) -> Res<Client> {
     let (cfg, _) = load(config, false)?;
     let mut facts = Vec::new();
     for f in &tools.facts {
@@ -27,7 +27,7 @@ fn client(config: Option<&Path>, tools: &Tools) -> Res<Client> {
         for (n, v) in &facts {
             t = t.fact(*n, *v);
         }
-        if tools.on_demand {
+        if on_demand {
             t = t.variants(Variants::OnDemand);
         }
         b = b.target(t);
@@ -72,9 +72,8 @@ pub fn fetch(config: Option<&Path>, a: Fetch) -> Res {
     let tools = Tools {
         targets: Vec::new(),
         facts: Vec::new(),
-        on_demand: false,
     };
-    let client = client(config, &tools)?;
+    let client = client(config, &tools, false)?;
     let variants: Option<Vec<String>> = if a.variant.is_empty() {
         None
     } else {
@@ -109,7 +108,7 @@ pub fn fetch(config: Option<&Path>, a: Fetch) -> Res {
 
 pub fn add(config: Option<&Path>, a: Add) -> Res {
     need_target(&a.tools)?;
-    let client = client(config, &a.tools)?;
+    let client = client(config, &a.tools, a.on_demand)?;
     let opts = Options {
         allow_young: a.allow_young,
     };
@@ -120,7 +119,7 @@ pub fn add(config: Option<&Path>, a: Add) -> Res {
 
 pub fn update(config: Option<&Path>, a: Update) -> Res {
     need_target(&a.tools)?;
-    let client = client(config, &a.tools)?;
+    let client = client(config, &a.tools, a.on_demand)?;
     let name = a.name.as_deref().map(Name::parse).transpose()?;
     let r = hatchery::block_on(client.update(name.as_ref(), &a.dir))?;
     print_report(&r);
@@ -129,7 +128,7 @@ pub fn update(config: Option<&Path>, a: Update) -> Res {
 
 pub fn install(config: Option<&Path>, a: Install) -> Res {
     need_target(&a.tools)?;
-    let client = client(config, &a.tools)?;
+    let client = client(config, &a.tools, a.on_demand)?;
     let r = hatchery::block_on(client.install(&a.dir))?;
     print_report(&r);
     Ok(())
@@ -139,9 +138,8 @@ pub fn remove(config: Option<&Path>, a: Remove) -> Res {
     let tools = Tools {
         targets: Vec::new(),
         facts: Vec::new(),
-        on_demand: false,
     };
-    let client = client(config, &tools)?;
+    let client = client(config, &tools, false)?;
     let name = Name::parse(&a.name)?;
     client.remove(&name, &a.dir)?;
     println!("removed {name}");
@@ -172,7 +170,7 @@ fn source_of(p: &hatchery::LockedPackage) -> String {
 }
 
 pub fn list(config: Option<&Path>, a: List) -> Res {
-    let client = client(config, &a.tools)?;
+    let client = client(config, &a.tools, false)?;
     if a.offered {
         return offered(&client, &a);
     }

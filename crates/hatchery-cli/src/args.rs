@@ -146,9 +146,6 @@ pub struct Tools {
     /// A fact every target answers, as NAME=VALUE
     #[arg(long = "fact", value_name = "NAME=VALUE")]
     pub facts: Vec<String>,
-    /// Do not fetch variants at install
-    #[arg(long)]
-    pub on_demand: bool,
 }
 
 #[derive(Args, Debug)]
@@ -160,6 +157,9 @@ pub struct Add {
     pub dir: PathBuf,
     #[command(flatten)]
     pub tools: Tools,
+    /// Do not fetch variants at install
+    #[arg(long)]
+    pub on_demand: bool,
     /// Install even if the version is younger than the minimum release age
     #[arg(long)]
     pub allow_young: bool,
@@ -173,6 +173,9 @@ pub struct Update {
     pub dir: PathBuf,
     #[command(flatten)]
     pub tools: Tools,
+    /// Do not fetch variants at install
+    #[arg(long)]
+    pub on_demand: bool,
 }
 
 #[derive(Args, Debug)]
@@ -181,6 +184,9 @@ pub struct Install {
     pub dir: PathBuf,
     #[command(flatten)]
     pub tools: Tools,
+    /// Do not fetch variants at install
+    #[arg(long)]
+    pub on_demand: bool,
 }
 
 #[derive(Args, Debug)]

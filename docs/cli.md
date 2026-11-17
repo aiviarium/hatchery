@@ -1,6 +1,12 @@
 # Command line
 
-`hatchery` is one program with a command for each step. It prints plain text for people. `inspect` and `list` also take `--json` for scripts. Errors go to standard error as `error: <message>`, and the exit status is 1.
+`hatchery` is one program with a command for each step. It prints plain text for people. `inspect` and `list` also take `--json` for scripts. Errors go to standard error as `error: <message>`.
+
+| Exit status | Meaning |
+| --- | --- |
+| 0 | The command worked |
+| 1 | The command failed. `error: <message>` says why |
+| 2 | The command line is wrong, such as an unknown option or a missing argument. The usage message says what is expected |
 
 `hatchery --version` prints `hatchery <version>`.
 
@@ -139,7 +145,7 @@ hatchery add --git https://github.com/aiviarium/parrot.git --path agents/claude 
 ## update
 
 ```text
-hatchery update [NAME] [--dir DIR] [--target NAME]… [--fact NAME=VALUE]…
+hatchery update [NAME] [--dir DIR] [--target NAME]… [--fact NAME=VALUE]… [--on-demand]
 ```
 
 Updates one package, or all, to the newest allowed versions.
@@ -147,7 +153,7 @@ Updates one package, or all, to the newest allowed versions.
 ## install
 
 ```text
-hatchery install [--dir DIR] [--target NAME]… [--fact NAME=VALUE]…
+hatchery install [--dir DIR] [--target NAME]… [--fact NAME=VALUE]… [--on-demand]
 ```
 
 Installs exactly what `eggs.lock` lists, and checks checksums and commits. Packages already installed at the locked version are left alone.
