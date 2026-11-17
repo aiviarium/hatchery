@@ -949,3 +949,44 @@ fn tree_digest_is_stable_and_sensitive() {
     fs::rename(b.path().join("two.txt"), b.path().join("x/two.txt")).unwrap();
     assert_ne!(same, hatchery::tree_digest(b.path()).unwrap());
 }
+
+#[test]
+fn eggs_do_not_nest() {
+    let d = tempfile::tempdir().unwrap();
+    demo(d.path());
+    let fat = pack(
+        d.path(),
+        &PackOptions {
+            fat: true,
+            ..opts()
+        },
+    )
+    .unwrap()
+    .pop()
+    .unwrap();
+    // A fat egg inside a fat egg.
+    let mut entries = fat.entries().to_vec();
+    entries.push(Entry {
+        path: format!("variants/{}", fat.file_name()),
+        data: fat.bytes().clone(),
+        executable: false,
+    });
+    let nested = hatchery::archive::write(&entries).unwrap();
+    assert!(Egg::open(nested).is_err());
+
+    // Many levels deep ends with an error, not a crash.
+    let mut inner = fat.bytes().clone();
+    for _ in 0..200 {
+        inner = hatchery::archive::write(&[
+            entry("package.kdl", MANIFEST),
+            Entry {
+                path: format!("variants/{}", fat.file_name()),
+                data: inner,
+                executable: false,
+            },
+        ])
+        .unwrap()
+        .into();
+    }
+    assert!(Egg::open(inner).is_err());
+}

@@ -16,6 +16,11 @@ use crate::error::{Error, IoContext, Result};
 pub const MAX_ENTRY_BYTES: u64 = 512 << 20;
 /// The most an archive may hold unpacked: 512 MiB.
 pub const MAX_TOTAL_BYTES: u64 = 512 << 20;
+/// What the tar stream (headers, padding, skipped data) may add to the
+/// bytes of the files.
+const STREAM_ALLOWANCE: u64 = 64 << 20;
+/// The most entries an archive may have.
+const MAX_ENTRIES: usize = 100_000;
 /// The most a PAX or GNU long-name header may hold.
 const MAX_META_BYTES: u64 = 16 << 20;
 /// The largest size an octal size field holds.
@@ -166,11 +171,23 @@ fn write_padding<W: Write>(w: &mut W, size: u64) -> std::io::Result<()> {
 /// Reads a gzipped tar archive into entries, refusing anything unsafe to
 /// unpack. Directory entries are dropped; the result is sorted by path.
 pub fn read(bytes: &[u8]) -> Result<Vec<Entry>> {
-    let mut reader = GzDecoder::new(bytes);
+    read_limited(bytes, MAX_TOTAL_BYTES)
+}
+
+/// Like [`read`], with a smaller limit on the bytes the files may hold
+/// together. The decompressed stream is also capped, and so is the number
+/// of entries, so a bomb ends quickly.
+pub fn read_limited(bytes: &[u8], max_total: u64) -> Result<Vec<Entry>> {
+    let mut reader = GzDecoder::new(bytes).take(max_total.saturating_add(STREAM_ALLOWANCE));
+    let mut count = 0usize;
     let mut entries: Vec<Entry> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut total = 0u64;
     scan_tar(&mut reader, |t| {
+        count += 1;
+        if count > MAX_ENTRIES {
+            return Err(bad(format!("archive has more than {MAX_ENTRIES} entries")));
+        }
         let Some(rel) = validate_entry_path(&t.path, t.is_dir)? else {
             return Ok(());
         };
@@ -178,9 +195,9 @@ pub fn read(bytes: &[u8]) -> Result<Vec<Entry>> {
             return Ok(());
         }
         total += t.data.len() as u64;
-        if total > MAX_TOTAL_BYTES {
+        if total > max_total {
             return Err(bad(format!(
-                "archive holds more than {MAX_TOTAL_BYTES} bytes unpacked"
+                "archive holds more than {max_total} bytes unpacked"
             )));
         }
         if !seen.insert(rel.clone()) {
@@ -616,5 +633,23 @@ mod tests {
             assert_eq!(got.data, e.data);
             assert_eq!(got.executable, e.executable);
         }
+    }
+
+    #[test]
+    fn bombs_end_with_an_error() {
+        // Many empty entries.
+        let many: Vec<(String, u8, &[u8])> = (0..MAX_ENTRIES + 1)
+            .map(|i| (format!("f{i}"), b'0', &b""[..]))
+            .collect();
+        let raw = make_raw_targz(many.iter().map(|(p, t, d)| (p.as_str(), *t, *d)).collect());
+        assert!(raw.len() < 2 << 20);
+        assert!(matches!(read(&raw), Err(Error::UnsafeArchive(_))));
+
+        // A file of zeros larger than the limit given.
+        let big = vec![0u8; 3 << 20];
+        let raw = make_raw_targz(vec![("a", b'0', &big)]);
+        assert!(raw.len() < 64 << 10);
+        assert!(read_limited(&raw, 1 << 20).is_err());
+        assert!(read_limited(&raw, 4 << 20).is_ok());
     }
 }

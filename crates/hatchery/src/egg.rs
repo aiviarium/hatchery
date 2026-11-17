@@ -195,14 +195,17 @@ impl Egg {
 
     /// Opens an egg of any kind, refusing unsafe entries.
     pub fn open(bytes: impl Into<Bytes>) -> Result<Egg> {
-        let bytes: Bytes = bytes.into();
-        let entries = archive::read(&bytes)?;
+        let mut budget = MAX_UNPACKED;
+        Egg::open_with(bytes.into(), &mut budget, false)
+    }
+
+    /// Opens an egg. `budget` is what is left of the unpacked size limit,
+    /// shared by an egg and the variant eggs inside it. An `embedded` egg
+    /// must be a variant egg, so eggs never nest.
+    fn open_with(bytes: Bytes, budget: &mut u64, embedded: bool) -> Result<Egg> {
+        let entries = archive::read_limited(&bytes, *budget)?;
         let total: u64 = entries.iter().map(|e| e.data.len() as u64).sum();
-        if total > MAX_UNPACKED {
-            return Err(Error::UnsafeArchive(format!(
-                "egg holds {total} bytes unpacked, more than {MAX_UNPACKED}"
-            )));
-        }
+        *budget = budget.saturating_sub(total);
         let find = |name: &str| entries.iter().find(|e| e.path == name);
         let text = |e: &Entry, what: &str| {
             std::str::from_utf8(&e.data)
@@ -218,6 +221,9 @@ impl Egg {
                 ));
             }
             let header = VariantHeader::parse(&text(v, VARIANT_FILE)?)?;
+            if header.target == VARIANTS_DIR {
+                return Err(Error::invalid("variant egg", "target cannot be variants"));
+            }
             let prefix = format!("{}/", header.dir());
             if let Some(e) = entries
                 .iter()
@@ -230,6 +236,12 @@ impl Egg {
             }
             (manifest_of_variant(&header), Kind::Variant(header))
         } else {
+            if embedded {
+                return Err(Error::invalid(
+                    "egg",
+                    "an egg inside an egg must be a variant egg",
+                ));
+            }
             let m = find(manifest::FILE)
                 .ok_or_else(|| Error::invalid("egg", format!("has no {}", manifest::FILE)))?;
             let manifest = Manifest::parse(&text(m, manifest::FILE)?)?;
@@ -242,7 +254,7 @@ impl Egg {
                     .ok_or_else(|| {
                         Error::invalid("egg", format!("{:?} is not a variant egg", e.path))
                     })?;
-                let inner = Egg::open(e.data.clone())?;
+                let inner = Egg::open_with(e.data.clone(), budget, true)?;
                 let ok = match inner.variant() {
                     Some(h) => {
                         h.name == manifest.name()
