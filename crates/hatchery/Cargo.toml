@@ -1,0 +1,35 @@
+[package]
+name = "hatchery"
+description = "Packages with content for several tools: pack, publish, resolve, verify and install eggs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# A Fetch over HTTP(S) with ureq, for callers that do not bring their own.
+http = ["dep:ureq"]
+# A blocking wrapper around the async Client.
+blocking = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+kdl.workspace = true
+semver.workspace = true
+flate2.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+url.workspace = true
+ureq = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

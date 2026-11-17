@@ -1,0 +1,23 @@
+[package]
+name = "hatchery-cli"
+description = "The hatchery command: pack, inspect, publish and install eggs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hatchery"
+path = "src/main.rs"
+
+[dependencies]
+hatchery = { workspace = true, features = ["http", "blocking"] }
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
