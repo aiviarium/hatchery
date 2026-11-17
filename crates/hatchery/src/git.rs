@@ -17,8 +17,9 @@ use crate::time::Timestamp;
 
 /// How long to wait for another user of a cache folder.
 const LOCK_WAIT: Duration = Duration::from_secs(60);
-/// A lock file older than this is left over from a process that died.
-const LOCK_STALE: Duration = Duration::from_secs(10 * 60);
+/// A lock file not written for this long is left over from a process that
+/// died.
+const LOCK_STALE: Duration = Duration::from_secs(30 * 60);
 
 /// How to run git.
 #[derive(Debug, Clone)]
@@ -103,7 +104,7 @@ impl Git {
             cmd.env(k, v);
         }
         cmd.stdin(Stdio::null());
-        let shown = args.join(" ");
+        let shown = redact_text(&args.join(" "));
         let out = cmd.output().map_err(|e| Error::Git {
             args: shown.clone(),
             message: format!("cannot run {}: {e}", self.program.display()),
@@ -113,17 +114,19 @@ impl Git {
         }
         Err(Error::Git {
             args: shown,
-            message: stderr_tail(&out.stderr, &out.status.to_string()),
+            message: redact_text(&stderr_tail(&out.stderr, &out.status.to_string())),
         })
     }
 
     /// One `git ls-remote`: the default branch, the branches and the tags.
     pub fn ls_remote(&self, url: &str) -> Result<Remote> {
+        check_url(url)?;
         let out = self.run_text(
             None,
             &[
                 "ls-remote",
                 "--symref",
+                "--",
                 url,
                 "HEAD",
                 "refs/heads/*",
@@ -136,9 +139,10 @@ impl Git {
     /// Opens the cache folder of a repository under `root`, creating it on
     /// first use, and holds its lock until the result is dropped.
     pub fn cache(&self, root: &Path, url: &str) -> Result<RepoCache> {
+        check_url(url)?;
         fs::create_dir_all(root).at_path(root)?;
         let name: String = sha256_hex(url.as_bytes()).chars().take(16).collect();
-        let lock = Lock::acquire(root.join(format!("{name}.lock")))?;
+        let lock = lock_path(&root.join(format!("{name}.lock")))?;
         let dir = root.join(&name);
         let cache = RepoCache {
             dir,
@@ -149,6 +153,70 @@ impl Git {
         cache.init()?;
         Ok(cache)
     }
+}
+
+/// Refuses an address git would take for an option, or that holds control
+/// characters.
+pub(crate) fn check_url(url: &str) -> Result<()> {
+    if url.is_empty() || url.starts_with('-') || url.chars().any(char::is_control) {
+        return Err(Error::invalid(
+            crate::fsx::redact_url(url),
+            "is not a valid git address",
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses a tag or branch name that git would take for an option or that
+/// `git check-ref-format --allow-onelevel` would refuse.
+pub(crate) fn check_ref(name: &str) -> Result<()> {
+    let bad = name.is_empty()
+        || name.starts_with(['-', '/', '.'])
+        || name.ends_with(['/', '.'])
+        || name.ends_with(".lock")
+        || name.contains("..")
+        || name.contains("//")
+        || name.contains("@{")
+        || name == "@"
+        || name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\'))
+        || name
+            .split('/')
+            .any(|c| c.starts_with('.') || c.ends_with(".lock"));
+    if bad {
+        return Err(Error::invalid(name, "is not a valid tag or branch name"));
+    }
+    Ok(())
+}
+
+/// A commit id: 40 hex digits (64 for SHA-256 repositories).
+pub(crate) fn check_commit(commit: &str) -> Result<()> {
+    if matches!(commit.len(), 40 | 64) && commit.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(Error::invalid(commit, "is not a commit id"))
+    }
+}
+
+/// Replaces the credentials of every address in a text.
+pub(crate) fn redact_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let start = rest[..i]
+            .rfind(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '`' | '<' | '('))
+            .map_or(0, |p| p + 1);
+        let tail = &rest[i..];
+        let end = tail
+            .find(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '`' | '>' | ')'))
+            .map_or(rest.len(), |e| i + e);
+        out.push_str(&rest[..start]);
+        out.push_str(&crate::fsx::redact_url(&rest[start..end]));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn stderr_tail(stderr: &[u8], fallback: &str) -> String {
@@ -188,54 +256,86 @@ fn parse_ls_remote(text: &str) -> Remote {
     r
 }
 
-/// A lock file, removed when dropped.
+/// A lock held through a file, released when dropped. Another process
+/// waits for it; a lock whose file has not been written for a long time is
+/// taken over.
 #[derive(Debug)]
-struct Lock {
+pub(crate) struct FileLock {
     path: PathBuf,
+    nonce: String,
 }
 
-impl Lock {
-    fn acquire(path: PathBuf) -> Result<Lock> {
-        let start = std::time::Instant::now();
-        loop {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write;
-                    let _ = writeln!(f, "{}", std::process::id());
-                    return Ok(Lock { path });
+/// Takes the lock file at `path`, waiting up to a minute for its holder.
+pub(crate) fn lock_path(path: &Path) -> Result<FileLock> {
+    let start = std::time::Instant::now();
+    let nonce = format!("{}\n", crate::fsx::nonce());
+    loop {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                if let Err(e) = f.write_all(nonce.as_bytes()) {
+                    let _ = fs::remove_file(path);
+                    return Err(e).at_path(path);
                 }
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                    let stale = fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|t| SystemTime::now().duration_since(t).ok())
-                        .is_some_and(|age| age > LOCK_STALE);
-                    if stale {
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                    if start.elapsed() > LOCK_WAIT {
-                        return Err(Error::other(format!(
-                            "{}: still locked by another process after {}s",
-                            path.display(),
-                            LOCK_WAIT.as_secs()
-                        )));
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => return Err(e).at_path(&path),
+                return Ok(FileLock {
+                    path: path.to_path_buf(),
+                    nonce,
+                });
             }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                if is_stale(path) {
+                    take_over(path);
+                    continue;
+                }
+                if start.elapsed() > LOCK_WAIT {
+                    return Err(Error::other(format!(
+                        "{}: still locked by another process after {}s",
+                        path.display(),
+                        LOCK_WAIT.as_secs()
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(e).at_path(path),
         }
     }
 }
 
-impl Drop for Lock {
+fn is_stale(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .is_some_and(|age| age > LOCK_STALE)
+}
+
+/// Moves a stale lock file away under a name of its own. Of several
+/// processes that try, one rename succeeds. If what was moved turns out to
+/// be fresh (another process took over first), it is put back.
+fn take_over(path: &Path) {
+    let moved = path.with_extension(format!("stale-{}", crate::fsx::nonce()));
+    if fs::rename(path, &moved).is_err() {
+        return;
+    }
+    if !is_stale(&moved) {
+        // Put a fresh lock back; if the path is taken again already, its
+        // holder only loses the exclusion.
+        let _ = fs::hard_link(&moved, path);
+    }
+    let _ = fs::remove_file(&moved);
+}
+
+impl Drop for FileLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        // Only a lock file that is still ours: after a take-over the path
+        // belongs to someone else.
+        if fs::read_to_string(&self.path).is_ok_and(|c| c == self.nonce) {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -268,7 +368,7 @@ pub struct RepoCache {
     dir: PathBuf,
     git: Git,
     url: String,
-    _lock: Lock,
+    _lock: FileLock,
 }
 
 impl RepoCache {
@@ -288,18 +388,19 @@ impl RepoCache {
                 .git
                 .run_text(Some(&self.dir), &["remote", "get-url", "origin"]);
             if current.ok().as_deref() != Some(self.url.as_str()) {
-                self.run(&["remote", "set-url", "origin", &self.url])?;
+                self.run(&["remote", "set-url", "origin", "--", &self.url])?;
             }
             return Ok(());
         }
         fs::create_dir_all(&self.dir).at_path(&self.dir)?;
         self.run(&["init", "--quiet"])?;
-        self.run(&["remote", "add", "origin", &self.url])?;
+        self.run(&["remote", "add", "origin", "--", &self.url])?;
         Ok(())
     }
 
     /// Fetches a tag shallowly and returns its commit.
     pub fn fetch_tag(&self, tag: &str) -> Result<String> {
+        check_ref(tag)?;
         let spec = format!("+refs/tags/{tag}:refs/tags/{tag}");
         self.fetch(&spec)?;
         self.rev_parse(&format!("refs/tags/{tag}^{{commit}}"))
@@ -307,6 +408,7 @@ impl RepoCache {
 
     /// Fetches a branch shallowly and returns its commit.
     pub fn fetch_branch(&self, branch: &str) -> Result<String> {
+        check_ref(branch)?;
         let spec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
         self.fetch(&spec)?;
         self.rev_parse(&format!("refs/remotes/origin/{branch}^{{commit}}"))
@@ -315,6 +417,7 @@ impl RepoCache {
     /// Fetches a commit by its id. This needs a server that allows it;
     /// protocol version 2 does.
     pub fn fetch_commit(&self, commit: &str) -> Result<()> {
+        check_commit(commit)?;
         let spec = format!("+{commit}:refs/hatchery/{commit}");
         self.fetch(&spec)?;
         let got = self.rev_parse(&format!("{commit}^{{commit}}"))?;
@@ -353,19 +456,23 @@ impl RepoCache {
 
     /// Whether the commit is in the cache already.
     pub fn has_commit(&self, commit: &str) -> bool {
-        self.git
-            .exec(
-                Some(&self.dir),
-                &[],
-                &["cat-file", "-e", &format!("{commit}^{{commit}}")],
-                &[("GIT_NO_LAZY_FETCH", "1")],
-            )
-            .is_ok()
+        check_commit(commit).is_ok()
+            && self
+                .git
+                .exec(
+                    Some(&self.dir),
+                    &[],
+                    &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+                    &[("GIT_NO_LAZY_FETCH", "1")],
+                )
+                .is_ok()
     }
 
     /// The bytes of a file at a commit. None when the commit has no such
     /// file.
     pub fn show(&self, commit: &str, path: &str) -> Result<Option<Vec<u8>>> {
+        check_commit(commit)?;
+        manifest::validate_rel_path("path", path)?;
         let listed = self.git.run_text(
             Some(&self.dir),
             &["ls-tree", "--format=%(objecttype)", commit, "--", path],
@@ -379,6 +486,7 @@ impl RepoCache {
     /// Every folder that holds a `package.kdl` at a commit, `/`-separated,
     /// not counting the root.
     pub fn manifest_dirs(&self, commit: &str) -> Result<Vec<String>> {
+        check_commit(commit)?;
         let out = self.run(&["ls-tree", "-r", "--name-only", "-z", commit])?;
         let mut dirs: Vec<String> = out
             .split(|b| *b == 0)
@@ -393,6 +501,7 @@ impl RepoCache {
 
     /// The commit's time.
     pub fn commit_time(&self, commit: &str) -> Result<Timestamp> {
+        check_commit(commit)?;
         let t = self
             .git
             .run_text(Some(&self.dir), &["log", "-1", "--format=%ct", commit])?;
@@ -405,6 +514,7 @@ impl RepoCache {
     /// is None) and copies it to `dest`, which must not exist yet. Nothing
     /// else of the repository is checked out. Symlinks are refused.
     pub fn export(&self, commit: &str, path: Option<&str>, dest: &Path) -> Result<()> {
+        check_commit(commit)?;
         match path {
             Some(p) => {
                 manifest::validate_rel_path("path", p)?;
@@ -549,7 +659,7 @@ pub(crate) fn pack_checkout(
         no_build: true,
         defaults: co.defaults.clone(),
         origin: Some(Origin {
-            repository: Some(url.to_string()),
+            repository: Some(crate::fsx::redact_url(url)),
             commit: Some(commit.to_string()),
             built: Some(co.time),
             hatchery: Some(crate::VERSION.into()),

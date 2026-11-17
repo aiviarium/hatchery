@@ -83,3 +83,59 @@ pub fn unhex(s: &str) -> Option<Vec<u8>> {
         .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
         .collect()
 }
+
+/// A repository address fit for a lock file, an egg or a message: the
+/// user and password of an `http(s)://` or `file://` URL are removed, and
+/// the password of any other URL. `user@host:path` is kept, since the user
+/// there names an account, not a secret.
+pub fn redact_url(remote: &str) -> String {
+    if !remote.contains("://") {
+        return remote.to_string();
+    }
+    match url::Url::parse(remote) {
+        Ok(mut u) if !u.username().is_empty() || u.password().is_some() => {
+            let _ = u.set_password(None);
+            if matches!(u.scheme(), "http" | "https" | "file") {
+                let _ = u.set_username("");
+            }
+            u.to_string()
+        }
+        Ok(_) => remote.to_string(),
+        // Not a URL we can parse: drop everything up to an `@` after the scheme.
+        Err(_) => match remote.split_once("://") {
+            Some((scheme, rest)) => match rest.split_once('@') {
+                Some((_, host)) if !rest.split('/').next().unwrap_or("").is_empty() => {
+                    format!("{scheme}://{host}")
+                }
+                _ => remote.to_string(),
+            },
+            None => remote.to_string(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacts_credentials() {
+        assert_eq!(
+            redact_url("https://ci:ghp_SECRET@example.org/x.git"),
+            "https://example.org/x.git"
+        );
+        assert_eq!(
+            redact_url("https://TOKEN@example.org/x.git"),
+            "https://example.org/x.git"
+        );
+        assert_eq!(
+            redact_url("ssh://git:pw@example.org/x.git"),
+            "ssh://git@example.org/x.git"
+        );
+        assert_eq!(
+            redact_url("git@example.org:org/x.git"),
+            "git@example.org:org/x.git"
+        );
+        assert_eq!(redact_url("/srv/repo.git"), "/srv/repo.git");
+    }
+}

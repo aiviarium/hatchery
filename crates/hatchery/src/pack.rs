@@ -482,19 +482,5 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// Removes a user name and password from a remote address, so that
 /// credentials never end up in an egg.
 fn strip_userinfo(remote: &str) -> String {
-    if remote.contains("://") {
-        if let Ok(mut u) = url::Url::parse(remote)
-            && (!u.username().is_empty() || u.password().is_some())
-        {
-            let _ = u.set_username("");
-            let _ = u.set_password(None);
-            return u.to_string();
-        }
-        return remote.to_string();
-    }
-    // `user@host:path`
-    match (remote.find('@'), remote.find(':')) {
-        (Some(at), Some(colon)) if at < colon => remote[at + 1..].to_string(),
-        _ => remote.to_string(),
-    }
+    crate::fsx::redact_url(remote)
 }

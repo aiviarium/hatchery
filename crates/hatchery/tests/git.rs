@@ -961,3 +961,164 @@ fn the_git_wrapper_reports_failures_and_lists_remotes() {
         e => panic!("{e}"),
     }
 }
+
+#[test]
+fn addresses_and_refs_that_look_like_options_are_refused() {
+    let f = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let marker = tmp.path().join("PWNED");
+    let evil = format!("--upload-pack=touch {}", marker.display());
+    let g = Git::new();
+
+    assert!(g.ls_remote(&evil).is_err());
+    assert!(g.cache(&f.cache, &evil).is_err());
+    assert!(g.ls_remote("ssh://host/\nrepo").is_err());
+    let reg = GitRegistry::new(&evil, &f.cache, Git::new(), None);
+    assert!(block_on(reg.names()).is_err());
+    let folder = GitFolder::new(&evil, None, None, &f.cache, Git::new());
+    assert!(block_on(folder.names()).is_err());
+    let egg = built_alpha(tmp.path(), "1.0.0");
+    assert!(publish_branch(&egg, &evil, "eggs", None, None, now(), &g).is_err());
+    assert!(publish_branch(&egg, &f.url, "--foo", None, None, now(), &g).is_err());
+    assert!(publish_branch(&egg, &f.url, "eggs", Some("../x"), None, now(), &g).is_err());
+    assert!(!marker.exists());
+
+    // Refs, commits and paths that reach git are checked.
+    let cache = g.cache(&f.cache, &f.url).unwrap();
+    for bad in ["--foo", "a..b", "x y", "-", "", "a:b", "x.lock", "/x"] {
+        assert!(cache.fetch_tag(bad).is_err(), "{bad:?}");
+        assert!(cache.fetch_branch(bad).is_err(), "{bad:?}");
+    }
+    let head = f.tag_commit("v1.0.0");
+    assert!(cache.fetch_commit("HEAD; touch x").is_err());
+    assert!(cache.fetch_commit("--all").is_err());
+    assert!(cache.show("HEAD; x", "packages.kdl").is_err());
+    assert!(!cache.has_commit("HEAD"));
+    cache.fetch_tag("v1.0.0").unwrap();
+    assert!(cache.show(&head, "../x").is_err());
+    assert!(cache.show(&head, "/etc/passwd").is_err());
+    assert!(
+        cache
+            .export(&head, Some("../x"), &tmp.path().join("out"))
+            .is_err()
+    );
+    drop(cache);
+
+    // A ref that is not a tag, branch or commit is an error, not an option.
+    let s = GitFolder::new(&f.url, None, Some("--foo".into()), &f.cache, Git::new());
+    assert!(block_on(s.names()).is_err());
+}
+
+#[test]
+fn credentials_in_addresses_do_not_reach_eggs_or_messages() {
+    let f = Fixture::new();
+    let secret = "https://ci:ghp_SECRET@127.0.0.1:1/x.git";
+    let err = Git::new().ls_remote(secret).unwrap_err();
+    assert!(!err.to_string().contains("ghp_SECRET"), "{err}");
+    assert!(matches!(err, Error::Git { .. }));
+    let reg = GitRegistry::new(secret, &f.cache, Git::new(), None);
+    let err = block_on(reg.names()).unwrap_err();
+    assert!(!format!("{err} {err:?}").contains("ghp_SECRET"), "{err}");
+
+    // The origin of an egg packed from a repository with a user in its
+    // address names the address without it.
+    let with_user = format!("file://ci:ghp_SECRET@{}", f.url);
+    let s = GitFolder::new(
+        &with_user,
+        Some("agents/alpha".into()),
+        Some("v1.0.0".into()),
+        &f.cache,
+        Git::new(),
+    );
+    match block_on(s.names()) {
+        Ok(_) => {
+            let o = versions(&s, &alpha()).pop().unwrap();
+            let egg = block_on(s.fetch(&o)).unwrap();
+            let repo = egg
+                .manifest()
+                .origin
+                .as_ref()
+                .unwrap()
+                .repository
+                .clone()
+                .unwrap();
+            assert!(!repo.contains("ghp_SECRET"), "{repo}");
+            assert!(!egg.manifest().to_kdl().contains("ghp_SECRET"));
+        }
+        Err(e) => assert!(!e.to_string().contains("ghp_SECRET"), "{e}"),
+    }
+}
+
+#[test]
+fn a_moved_tag_is_refused_for_built_eggs_too() {
+    let f = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    publish(&f, &built_alpha(tmp.path(), "1.0.0"), None);
+    let reg = f.registry();
+    let a = versions(&reg, &alpha());
+    let o = offer(&a, "1.0.0").clone();
+    assert!(o.built);
+    block_on(reg.fetch(&o)).unwrap();
+
+    write(&f.work, "agents/alpha/crow/plugin.json", "{}");
+    git_commit(&f.work, "move");
+    git(&f.work, &["tag", "-f", "v1.0.0"]);
+    git(&f.work, &["push", "-q", "-f", "origin", "v1.0.0"]);
+    assert!(matches!(
+        block_on(reg.fetch(&o)).unwrap_err(),
+        Error::TagMoved { .. }
+    ));
+}
+
+#[test]
+fn a_folder_says_whether_its_ref_is_a_tag() {
+    let f = Fixture::new();
+    let is_tag = |r: Option<&str>| {
+        let s = GitFolder::new(
+            &f.url,
+            Some("agents/alpha".into()),
+            r.map(str::to_string),
+            &f.cache,
+            Git::new(),
+        );
+        block_on(s.ref_is_tag()).unwrap()
+    };
+    assert!(is_tag(Some("v1.0.0")));
+    assert!(!is_tag(Some("main")));
+    assert!(!is_tag(None));
+    assert!(!is_tag(Some(&f.tag_commit("v1.0.0"))));
+}
+
+#[test]
+fn a_stale_lock_is_taken_over_and_a_live_one_is_kept() {
+    let f = Fixture::new();
+    let g = Git::new();
+    let held = g.cache(&f.cache, &f.url).unwrap();
+    let lock = fs::read_dir(&f.cache)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|e| e == "lock"))
+        .unwrap();
+    assert!(lock.exists());
+    drop(held);
+    assert!(!lock.exists());
+
+    // A lock left by a dead process, 40 minutes old.
+    fs::write(&lock, "dead\n").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 60);
+    fs::File::options()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let again = g.cache(&f.cache, &f.url).unwrap();
+    drop(again);
+    assert!(!lock.exists());
+
+    // A lock that someone else took over is not removed by the old holder.
+    let held = g.cache(&f.cache, &f.url).unwrap();
+    fs::write(&lock, "someone else\n").unwrap();
+    drop(held);
+    assert!(lock.exists());
+}

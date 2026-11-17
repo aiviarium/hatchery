@@ -64,8 +64,13 @@ impl GitRegistry {
         }
     }
 
+    /// The address without credentials, for messages.
+    fn shown(&self) -> String {
+        crate::fsx::redact_url(&self.url)
+    }
+
     fn at(&self, name: &Name, version: impl std::fmt::Display) -> At {
-        At::new(name).version(version).registry(&self.url)
+        At::new(name).version(version).registry(self.shown())
     }
 
     /// The root manifest and the packages of the default branch. Reads the
@@ -73,12 +78,15 @@ impl GitRegistry {
     fn root(&self, remote: &Remote) -> Result<Arc<Root>> {
         let branch = remote.default_branch.as_deref().ok_or_else(|| {
             Error::invalid(
-                &self.url,
+                self.shown(),
                 "has no default branch, so it has no packages.kdl",
             )
         })?;
         let tip = remote.branches.get(branch).ok_or_else(|| {
-            Error::invalid(&self.url, format!("default branch {branch} has no commit"))
+            Error::invalid(
+                self.shown(),
+                format!("default branch {branch} has no commit"),
+            )
         })?;
         if let Some(r) = self.root.lock().unwrap().as_ref()
             && r.commit == *tip
@@ -94,7 +102,7 @@ impl GitRegistry {
         };
         let text = cache.show(&commit, repo::FILE)?.ok_or_else(|| {
             Error::invalid(
-                &self.url,
+                self.shown(),
                 format!(
                     "has no {} on branch {branch}; a repository used as a registry needs one",
                     repo::FILE
@@ -104,7 +112,7 @@ impl GitRegistry {
         let manifest =
             RepoManifest::parse(&String::from_utf8_lossy(&text)).map_err(|e| match e {
                 Error::Invalid { message, .. } => {
-                    Error::invalid(format!("{} of {}", repo::FILE, self.url), message)
+                    Error::invalid(format!("{} of {}", repo::FILE, self.shown()), message)
                 }
                 e => e,
             })?;
@@ -156,6 +164,24 @@ impl GitRegistry {
 
     fn package<'a>(root: &'a Root, name: &Name) -> Option<&'a Pkg> {
         root.packages.iter().find(|p| p.name == *name)
+    }
+
+    /// A built offer that came with a tag must still have the tag where it
+    /// was.
+    fn check_tag(&self, offer: &Offer) -> Result<()> {
+        let (Some(tag), Some(commit)) = (&offer.git_ref, &offer.commit) else {
+            return Ok(());
+        };
+        let remote = self.git.ls_remote(&self.url)?;
+        match remote.tags.get(tag) {
+            Some(now) if now == commit => Ok(()),
+            other => Err(Error::TagMoved {
+                at: self.at(&offer.name, &offer.version),
+                tag: tag.clone(),
+                locked: commit.clone(),
+                now: other.cloned().unwrap_or_else(|| "(no such tag)".into()),
+            }),
+        }
     }
 
     fn fetch_source(&self, offer: &Offer, variant: Option<(&str, &str)>) -> Result<Egg> {
@@ -287,7 +313,9 @@ impl Source for GitRegistry {
             else {
                 return Err(Error::other(format!(
                     "{} {}: no details from {}",
-                    offer.name, offer.version, self.url
+                    offer.name,
+                    offer.version,
+                    self.shown()
                 )));
             };
             let key = (commit.clone(), path.clone());
@@ -330,6 +358,7 @@ impl Source for GitRegistry {
     fn fetch<'a>(&'a self, offer: &'a Offer) -> BoxFuture<'a, Result<Egg>> {
         Box::pin(async move {
             if offer.built {
+                self.check_tag(offer)?;
                 let eggs = self.built_registry(offer)?;
                 return eggs.fetch(offer).await;
             }
@@ -345,6 +374,7 @@ impl Source for GitRegistry {
     ) -> BoxFuture<'a, Result<Egg>> {
         Box::pin(async move {
             if offer.built {
+                self.check_tag(offer)?;
                 let eggs = self.built_registry(offer)?;
                 return eggs.fetch_variant(offer, target, key).await;
             }
@@ -441,6 +471,8 @@ fn publish_once(
     now: Timestamp,
     git: &Git,
 ) -> Result<Published> {
+    crate::git::check_url(url)?;
+    crate::git::check_ref(branch)?;
     let scratch = Scratch::new()?;
     let repo = scratch.path().join("repo");
     std::fs::create_dir_all(&repo).at_path(&repo)?;
@@ -448,7 +480,7 @@ fn publish_once(
 
     let remote = git.ls_remote(url)?;
     git.run(Some(&repo), &["init", "--quiet"])?;
-    git.run(Some(&repo), &["remote", "add", "origin", url])?;
+    git.run(Some(&repo), &["remote", "add", "origin", "--", url])?;
     if remote.branches.contains_key(branch) {
         let spec = format!("+{head}:refs/remotes/origin/{branch}");
         git.exec(

@@ -50,15 +50,21 @@ impl GitFolder {
         }
     }
 
+    fn shown(&self) -> String {
+        crate::fsx::redact_url(&self.url)
+    }
+
     fn resolve(&self, remote: &Remote) -> Result<Resolved> {
         let (name, kind, commit) = match &self.git_ref {
             None => {
-                let b = remote
-                    .default_branch
-                    .clone()
-                    .ok_or_else(|| Error::other(format!("{}: has no default branch", self.url)))?;
+                let b = remote.default_branch.clone().ok_or_else(|| {
+                    Error::other(format!("{}: has no default branch", self.shown()))
+                })?;
                 let c = remote.branches.get(&b).cloned().ok_or_else(|| {
-                    Error::other(format!("{}: default branch {b} has no commit", self.url))
+                    Error::other(format!(
+                        "{}: default branch {b} has no commit",
+                        self.shown()
+                    ))
                 })?;
                 (b, Kind::Branch, c)
             }
@@ -72,7 +78,7 @@ impl GitFolder {
                 } else {
                     return Err(Error::other(format!(
                         "{}: no tag, branch or commit {r}",
-                        self.url
+                        self.shown()
                     )));
                 }
             }
@@ -91,6 +97,15 @@ impl GitFolder {
             Kind::Branch => cache.fetch_branch(&r.name),
             Kind::Commit => cache.fetch_commit(&r.commit).map(|()| r.commit.clone()),
         }
+    }
+
+    /// Whether the ref names a tag now, which the client uses to refuse a
+    /// moved tag on update.
+    pub fn ref_is_tag(&self) -> BoxFuture<'_, Result<bool>> {
+        Box::pin(async move {
+            let remote = self.git.ls_remote(&self.url)?;
+            Ok(self.resolve(&remote)?.kind == Kind::Tag)
+        })
     }
 
     fn offer(&self) -> Result<Offer> {
@@ -115,7 +130,7 @@ impl GitFolder {
     fn at(&self, offer: &Offer) -> At {
         At::new(&offer.name)
             .version(&offer.version)
-            .registry(&self.url)
+            .registry(self.shown())
     }
 
     fn fetch_folder(&self, offer: &Offer, variant: Option<(&str, &str)>) -> Result<Egg> {
