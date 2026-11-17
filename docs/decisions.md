@@ -86,6 +86,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 
 - The version already installed is never held back by the minimum release age, and it is not dropped because it was withdrawn. It stays, and the report warns about a withdrawn one. An update still moves to a newer version that is allowed.
 - `--allow-young` lifts the hold for the package named in the request, not for its dependencies.
+- A version is skipped only for a reason it cannot be installed here. A failure to read it, such as a network or git error, stops the resolution, so that an older version is not chosen by accident.
 - A version whose newest candidates are skipped falls back to an older one. When nothing is left, the error is the reason of the newest version in range: `Withdrawn`, `Unmet`, `NoVariant`, `NotBuilt` or `TooYoung`.
 - Versions from git tags have no signed publish time, so they count from when this installation first saw them. So a new installation with a hold doesn't install a version that only has a tag until the hold has passed. Give your own repository `min-age="0d"`, or use `--allow-young`.
 - The backdating guard counts per registry and package. Versions in the first listing of a package count from their signed time. A version that appears later counts from the later of its signed time and when it was first seen.

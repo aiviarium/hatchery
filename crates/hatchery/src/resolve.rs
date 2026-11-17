@@ -200,6 +200,22 @@ mod no_target_tests {
     }
 }
 
+/// Whether an error says a version cannot be installed here, which skips
+/// it, rather than that it could not be read.
+fn not_installable(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Withdrawn { .. }
+            | Error::SignatureInvalid { .. }
+            | Error::Unmet { .. }
+            | Error::NoVariant { .. }
+            | Error::NotBuilt { .. }
+            | Error::TooYoung { .. }
+            | Error::Invalid { .. }
+            | Error::NotFound { .. }
+    )
+}
+
 /// The error for a version a registry with a key offers only as a tag.
 fn unsigned(offer: &Offer) -> Error {
     Error::SignatureInvalid {
@@ -472,8 +488,22 @@ impl Resolver {
         Ok(mine.iter().map(|(t, _)| t.name().to_string()).collect())
     }
 
-    /// Runs every filter on one offer.
-    async fn evaluate(&self, idx: usize, offer: &Offer) -> std::result::Result<Pick, Error> {
+    /// Runs every filter on one offer. The inner error is the reason the
+    /// version is skipped; the outer one, such as a failed fetch, stops the
+    /// resolution, because an older version must not be chosen only because
+    /// the newer one could not be read.
+    async fn evaluate(
+        &self,
+        idx: usize,
+        offer: &Offer,
+    ) -> Result<std::result::Result<Pick, Error>> {
+        match self.filter(idx, offer).await {
+            Err(e) if !not_installable(&e) => Err(e),
+            r => Ok(r),
+        }
+    }
+
+    async fn filter(&self, idx: usize, offer: &Offer) -> std::result::Result<Pick, Error> {
         // An installed version that was withdrawn stays; the caller warns.
         let installed_here = self
             .installed
@@ -677,7 +707,7 @@ impl Resolver {
                     if kept_version.as_ref() == Some(&offer.version) {
                         continue;
                     }
-                    match self.evaluate(idx, offer).await {
+                    match self.evaluate(idx, offer).await? {
                         Err(skip) => {
                             first_skip.get_or_insert(skip);
                         }
@@ -912,7 +942,11 @@ mod tests {
                     .iter()
                     .find(|o| o.version == offer.version)
                     .unwrap();
-                Ok(found.details.clone().unwrap())
+                // An offer without details stands for one that cannot be read.
+                found.details.clone().ok_or_else(|| Error::Http {
+                    url: self.label.clone(),
+                    message: "connection refused".into(),
+                })
             })
         }
 
@@ -1400,6 +1434,18 @@ mod tests {
         // A registry with a key signs the time, which counts.
         let signed = resolver_with(backdated(), 3 * DAY);
         assert!(solve(&signed, &[("g/a", "*")]).is_ok());
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_read_stops_the_resolution() {
+        let mut unreadable = offer("g/a", "1.1.0", vec![info("crow")]);
+        unreadable.details = None;
+        let r = resolver_with(
+            vec![offer("g/a", "1.0.0", vec![info("crow")]), unreadable],
+            0,
+        );
+        let err = solve(&r, &[("g/a", "*")]).unwrap_err();
+        assert!(matches!(err, Error::Http { .. }), "{err}");
     }
 
     #[test]
