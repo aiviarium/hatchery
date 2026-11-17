@@ -16,18 +16,30 @@ Hatchery is a Rust library and a command. It turns package folders into eggs and
 | `crates/hatchery/tests/` | Integration tests. `tests/common/mod.rs` has package folders, git helpers and a fixed clock |
 | `crates/hatchery-cli/` | The `hatchery` command. `args.rs` is the grammar in clap, and one module for each group of commands |
 | `docs/` | The documentation, in Markdown |
+| `examples/` | Example packages and the playground scripts. See `docs/playground.md` |
+| `ci/checks.sh` | The checks CI runs |
 | `.vale/` | The prose rules |
 
 ## Build and check
 
-CI runs these:
+CI runs one script, and so can you:
 
 ```bash
-cargo fmt --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-vale --minAlertLevel=warning README.md AGENTS.md CLAUDE.md docs .github/CONTRIBUTING.md .github/SECURITY.md .github/CODE_OF_CONDUCT.md
+ci/checks.sh
 ```
+
+Name checks to run only those, as in `ci/checks.sh fmt clippy`. The table lists the names. A check whose tool you have not installed is skipped on your machine and fails in CI.
+
+| Check | Tool | What it covers |
+| --- | --- | --- |
+| `fmt`, `clippy`, `test` | cargo | Formatting, lints as errors, and the tests |
+| `doc` | cargo | The API documentation builds with no warning, and a public item without a doc comment is one |
+| `vale` | [Vale](https://vale.sh) | The prose rules in `.vale/` over the Markdown files |
+| `typos` | [typos](https://github.com/crate-ci/typos) | Spelling in code and docs. Exceptions go in `_typos.toml` |
+| `deny` | [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) | Licenses, advisories and sources of dependencies, by `deny.toml` |
+| `links` | [lychee](https://lychee.cli.rs) | Links between the Markdown files |
+
+CI also builds with the Rust version in `rust-version`, and runs `examples/playground.sh` and `examples/playground-check.sh`.
 
 The tests use `git`, which has to be installed. They run it with a fixed identity and no user or system configuration.
 
@@ -40,6 +52,8 @@ The tests use `git`, which has to be installed. They run it with a fixed identit
 - Eggs are written deterministically. A change to the writers keeps the same input giving the same SHA-256.
 - A change to a file format keeps format 1 additive: only optional nodes. Unknown nodes are kept when a file is written again.
 - Documentation is written for people, in short sentences and with tables for lookups. It has to pass vale.
+- Every public item of the library has a doc comment that says what a caller needs to know.
+- A change to what a command prints or accepts updates `docs/cli.md`, and `docs/playground.md` and `examples/playground-check.sh` when a step there changes.
 - Tests and examples use made-up names such as `example` and `demo`, and `example.org` addresses. The names `crow` and `rookery` are fine as made-up target names.
 - Secrets never go into argv, logs or the repository. The signing key and tokens are read from environment variables.
 - Crate dependencies stay few. Add one only when the task needs it.

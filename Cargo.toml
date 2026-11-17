@@ -8,6 +8,8 @@ edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/aiviarium/hatchery"
+# Used as a git dependency and from release binaries, not from crates.io.
+publish = false
 
 [workspace.dependencies]
 hatchery = { path = "crates/hatchery" }
@@ -27,6 +29,13 @@ tempfile = "3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+missing_docs = "warn"
+
+# Left-over debugging and placeholders never get merged.
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 # Development and test builds: line numbers in backtraces, and no debug
 # information for dependencies, which makes them quicker to build and link.

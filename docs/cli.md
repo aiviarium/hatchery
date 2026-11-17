@@ -8,7 +8,7 @@
 
 | Option | Meaning |
 | --- | --- |
-| `--config PATH` | The `hatchery.kdl` to use. Without it, the file is found as [hatchery.kdl](hatchery-kdl.md#where-the-command-looks) says, and an empty configuration is used when there is none |
+| `--config PATH` | The `hatchery.kdl` to use. Without it, the file is found as [hatchery.kdl](hatchery-kdl.md#finding-the-file) says, and an empty configuration is used when there is none |
 
 ## Commands
 

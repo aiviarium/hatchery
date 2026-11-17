@@ -52,14 +52,13 @@ Using a model to help is fine. What we ask:
 ## Making the change
 
 You need a Rust toolchain at the version in `rust-version` and `git`. CI runs
-these:
+one script, and so can you:
 
 ```bash
-cargo fmt --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-vale --minAlertLevel=warning README.md AGENTS.md CLAUDE.md docs .github/*.md
+ci/checks.sh
 ```
+
+[AGENTS.md](../AGENTS.md#build-and-check) lists the checks and the tools they need.
 
 A pull request is ready when:
 

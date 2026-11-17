@@ -1,0 +1,10 @@
+# Spelling, checked by `typos` in CI. Vendored prose rules list misspellings
+# on purpose, and test data holds made-up words and hashes.
+[files]
+extend-exclude = [".vale/styles/", "Cargo.lock", "LICENSE-*"]
+
+[default]
+extend-ignore-re = [
+  # Hex strings: checksums, keys and commits.
+  "\\b[0-9a-f]{12,}\\b",
+]

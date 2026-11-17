@@ -15,26 +15,28 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
 jobs:
-  fmt:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --check
-
-  clippy:
+  # Formatting, lints, the API documentation, prose, spelling, links and the
+  # dependency rules. ci/checks.sh runs the same checks on your machine.
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      VALE_VERSION: 3.25.1
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,typos-cli,lychee
+      - name: Install Vale
+        run: |
+          curl -fsSL "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" vale
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: ci/checks.sh fmt clippy doc vale typos links deny
 
   # The tests pack, publish and install with the git command, which both
   # runners have.
@@ -54,25 +56,37 @@ jobs:
           git config --global user.name hatchery-ci
           git config --global user.email ci@example.org
           git config --global init.defaultBranch main
-      - run: cargo test --locked --workspace --all-features
+      - run: ci/checks.sh test
 
-  lint:
+  # The oldest Rust that Cargo.toml promises still builds everything.
+  msrv:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      VALE_VERSION: 3.25.1
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - name: Install Vale
-        run: |
-          curl -fsSL "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz" \
-            | tar -xz -C "$RUNNER_TEMP" vale
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - run: vale --minAlertLevel=warning README.md AGENTS.md CLAUDE.md docs .github/CONTRIBUTING.md .github/SECURITY.md .github/CODE_OF_CONDUCT.md
+      - name: Read rust-version
+        run: echo "MSRV=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.MSRV }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --workspace --all-targets --all-features
+
+  # The playground script is the documented way to try hatchery, so it has
+  # to keep working.
+  playground:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: examples/playground.sh
+      - run: examples/playground-check.sh
 
   # The check that branch protection can require.
   ci:
-    needs: [fmt, clippy, test, lint]
+    needs: [checks, test, msrv, playground]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
