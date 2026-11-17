@@ -113,10 +113,10 @@ A new version is not installed until it has been public for a set time. Most mal
 | --- | --- |
 | A built egg in a registry with a `key` | The Ed25519 signature over the package, version, file name, checksum and publish time |
 | A built egg in a registry without a key | The checksum in the index. The index is only as safe as the transport |
-| A tag's source in a git registry | Git's transport and the commit in `eggs.lock`. A tag that later points elsewhere is refused with `TagMoved` |
+| A tag's source in a git registry without a key, or with `unsigned-tags=#true` | Git's transport and the commit in `eggs.lock`. A tag that later points elsewhere is refused with `TagMoved`. Whoever can push a tag can release |
 | A folder or a file | You chose the exact one |
 
-A registry with a key refuses an unsigned egg. The signing key is never in `hatchery.kdl` or on a command line. It travels in an environment variable.
+A registry with a key refuses an unsigned egg. A git registry with a key also refuses a version that has only a tag, unless its line says `unsigned-tags=#true`. The signing key is never in `hatchery.kdl` or on a command line. It travels in an environment variable.
 
 ## What Hatchery leaves out
 

@@ -190,6 +190,14 @@ mod no_target_tests {
     }
 }
 
+/// The error for a version a registry with a key offers only as a tag.
+fn unsigned(offer: &Offer) -> Error {
+    Error::SignatureInvalid {
+        at: at_of(offer),
+        reason: crate::source::TAG_ONLY.to_string(),
+    }
+}
+
 fn conflict(name: &Name, version: &Version, message: String) -> Error {
     Error::Conflict {
         at: At::new(name).version(version),
@@ -466,6 +474,9 @@ impl Resolver {
                 reason: w.reason.clone(),
             });
         }
+        if offer.needs_signature && !installed_here {
+            return Err(unsigned(offer));
+        }
         let details = self.details(idx, offer).await?;
         let targets = self.check(offer, &details)?;
         if let Some(until) = self.young(idx, offer) {
@@ -498,6 +509,10 @@ impl Resolver {
                     at: at_of(offer),
                     reason: w.reason.clone(),
                 });
+                continue;
+            }
+            if offer.needs_signature {
+                first_skip.get_or_insert(unsigned(offer));
                 continue;
             }
             if let Some(until) = self.young(idx, offer) {

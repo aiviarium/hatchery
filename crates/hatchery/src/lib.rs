@@ -48,7 +48,7 @@ pub use kdl;
 pub use semver;
 
 pub use client::{
-    Change, Client, ClientBuilder, Installed, Offered, OfferedVersion, Options, Report,
+    Change, Client, ClientBuilder, Installed, Listing, Offered, OfferedVersion, Options, Report,
 };
 pub use config::{Config, RegistryConfig};
 pub use digest::{sha256_hex, tree_digest};

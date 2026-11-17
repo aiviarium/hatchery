@@ -456,22 +456,42 @@ impl RepoCache {
         Ok(())
     }
 
+    /// Fetches several tags shallowly in one request. Tags the cache has
+    /// already are fetched again, which is cheap.
+    pub fn fetch_tags(&self, tags: &[&str]) -> Result<()> {
+        let mut specs = Vec::new();
+        for t in tags {
+            check_ref(t)?;
+            specs.push(format!("+refs/tags/{t}:refs/tags/{t}"));
+        }
+        // Long lists go in a few requests, to stay below command-line limits.
+        for chunk in specs.chunks(200) {
+            let chunk: Vec<&str> = chunk.iter().map(String::as_str).collect();
+            self.fetch_specs(&chunk)?;
+        }
+        Ok(())
+    }
+
     fn fetch(&self, refspec: &str) -> Result<()> {
-        self.git.exec(
-            Some(&self.dir),
-            &["protocol.version=2"],
-            &[
-                "fetch",
-                "--quiet",
-                "--depth",
-                "1",
-                "--filter=blob:none",
-                "--no-tags",
-                "origin",
-                refspec,
-            ],
-            &[],
-        )?;
+        self.fetch_specs(&[refspec])
+    }
+
+    fn fetch_specs(&self, refspecs: &[&str]) -> Result<()> {
+        if refspecs.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec![
+            "fetch",
+            "--quiet",
+            "--depth",
+            "1",
+            "--filter=blob:none",
+            "--no-tags",
+            "origin",
+        ];
+        args.extend_from_slice(refspecs);
+        self.git
+            .exec(Some(&self.dir), &["protocol.version=2"], &args, &[])?;
         Ok(())
     }
 

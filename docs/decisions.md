@@ -101,6 +101,11 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - A built egg on the eggs branch whose version has a tag is checked against that tag's commit too.
 - A withdrawal in `packages.kdl` on the default branch counts even when the eggs branch index does not list it.
 - The eggs branch may hold versions without a tag. They are offered as built eggs with no commit.
+- With a `key`, a version that has only a tag is not offered and not installed: `SignatureInvalid`. `unsigned-tags=#true` on the line allows it. This holds for installs from `eggs.lock` too.
+- A package is found by its name among the packages of the tag's own commit. The folder on the default branch is only tried first. An install from the lock tries the locked folder first.
+- A package that left the default branch keeps its built eggs, and its locked tags still install from the lock. It is no longer offered for new installs.
+- A tag pattern without `{id}` is shared. A shared tag counts for a package only when the package's manifest at that commit has the tag's version. Listing such a package fetches each of its candidate tags once.
+- A package folder whose `package.kdl` on the default branch does not parse is skipped, and the source reports it through `Source::warnings`. Asking for a package whose folder has that name gives the parse error.
 - Registry addresses in `eggs.lock`, in `.hatchery/seen.toml`, in an egg's `origin`, in listings and in error messages have their user and password removed. Only git itself is given the address as configured.
 - The git cache is `$XDG_CACHE_HOME/hatchery/git` (or `~/.cache/hatchery/git`), one folder per repository, used by one process at a time.
 

@@ -38,7 +38,8 @@ A tool can add a kind with `ClientBuilder::kind`, backed by its own `Source`.
 | Property | Meaning |
 | --- | --- |
 | `only="a,b"` | Serve only these groups. Without it, a registry can serve any group. This stops a second registry from answering for a group that is yours |
-| `key="ed25519:…"` | The registry's public key. Eggs from it must be signed |
+| `key="ed25519:…"` | The registry's public key. Eggs from it must be signed. For a `git` registry, a version that has only a tag is not installed |
+| `unsigned-tags=#true` | For a `git` registry with a `key`: install versions that have only a tag from source, unsigned. Anyone who can push a tag can then release. Off by default |
 | `min-age="3d"` | The minimum release age for this registry |
 | `token-env="VAR"` | The environment variable with a bearer token for it |
 

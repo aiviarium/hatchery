@@ -95,7 +95,9 @@ registries {
 ```
 
 - What it offers is read from `packages.kdl` on the default branch.
-- Versions are tags, matched against the tag pattern. The version in the manifest at the tag must match the tag.
+- Versions are tags, matched against the tag pattern. The version in the manifest at the tag must match the tag. When the pattern has no `{id}`, as in `v{version}`, all packages share the tags, and a tag counts for a package only if the package's manifest at that tag has the tag's version.
+- The package is read where it is at the tag's commit, so a package that moved to another folder or left the default branch since still installs from its older tags. An install from `eggs.lock` uses the folder the lock records.
+- A package whose `package.kdl` on the default branch does not parse is skipped with a warning. The other packages of the repository are still offered. Asking for the broken package gives its error.
 - Ranges and update checks read the tag list with `git ls-remote`. 
 - Fetching is a shallow, partial clone. Hatchery reads the package's folder from it. The files are the committed bytes, with no line-ending conversion or filters from `.gitattributes` or your git configuration. One cached copy per repository is reused for all its packages.
 - The lock file records the commit. If a tag later points at a different commit, Hatchery refuses to install and says so.
@@ -111,6 +113,7 @@ A tag holds source code, and Hatchery never builds at install. A target with no 
 
 - For each version Hatchery looks in the eggs branch first.
 - It falls back to the tag's source only when there is no egg for the version and none of the wanted targets has a build.
+- A registry line with a `key` installs only signed eggs. A version that has only a tag is not offered, and asking for it fails with `SignatureInvalid`: the registry requires signed eggs, and the version has only a tag. Otherwise anyone who can push a tag could release without the key. Add `unsigned-tags=#true` to the line to install such versions from source anyway.
 - Otherwise it fails with `NotBuilt`.
 - Whoever installs lists the repository once. Their side stays the same when a package gains its first built target.
 

@@ -150,12 +150,15 @@ impl ClientBuilder {
                 .transpose()
                 .map_err(|e| Error::invalid(&line, e))?;
             let source: Arc<dyn Source> = match cfg.kind.as_str() {
-                "git" => Arc::new(GitRegistry::new(
-                    cfg.location.clone(),
-                    cache_dir.join("git"),
-                    git.clone(),
-                    key,
-                )),
+                "git" => Arc::new(
+                    GitRegistry::new(
+                        cfg.location.clone(),
+                        cache_dir.join("git"),
+                        git.clone(),
+                        key,
+                    )
+                    .unsigned_tags(cfg.unsigned_tags),
+                ),
                 "http" => {
                     let fetch = self.fetch.clone().ok_or_else(|| {
                         Error::invalid(&line, "an http registry needs a Fetch, and none was given")
@@ -266,6 +269,16 @@ pub struct Offered {
     pub updatable: Option<Version>,
     /// When the newest version becomes installable, if it is held.
     pub held_until: Option<Timestamp>,
+}
+
+/// What [`Client::offered`] found.
+#[derive(Debug, Clone, Default)]
+pub struct Listing {
+    /// The packages, sorted by name.
+    pub packages: Vec<Offered>,
+    /// Registries that could not be read while others could, and packages
+    /// a registry skipped, such as one whose `package.kdl` does not parse.
+    pub warnings: Vec<String>,
 }
 
 /// One version of an [`Offered`] package.
@@ -446,6 +459,19 @@ impl Client {
             ));
         }
         Ok(())
+    }
+
+    /// What the registries skipped over, for the warnings of a report.
+    fn source_warnings(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for r in &self.registries {
+            for w in r.source.warnings() {
+                if !out.contains(&w) {
+                    out.push(w);
+                }
+            }
+        }
+        out
     }
 
     fn git_cache(&self) -> PathBuf {
@@ -646,16 +672,36 @@ impl Client {
             });
         }
         let offers = source.versions(&lp.name).await?;
-        let mut offer = offers
-            .into_iter()
-            .find(|o| o.version == lp.version)
-            .ok_or_else(|| Error::NotFound {
-                at: At::new(&lp.name)
-                    .version(&lp.version)
-                    .registry(source.label()),
-            })?;
+        let found = offers.into_iter().find(|o| o.version == lp.version);
+        let mut offer = match found {
+            Some(o) => o,
+            // A package that left the default branch of a git registry, or
+            // whose tag no longer matches its pattern, is still at its tag.
+            None if self.lock_git_url(ls).is_some()
+                && matches!(ls, LockSource::Registry(_))
+                && lp.git_ref.is_some()
+                && lp.commit.is_some() =>
+            {
+                let mut o = Offer::new(lp.name.clone(), lp.version.clone(), source.label());
+                o.built = false;
+                o.git_ref = lp.git_ref.clone();
+                o
+            }
+            None => {
+                return Err(Error::NotFound {
+                    at: At::new(&lp.name)
+                        .version(&lp.version)
+                        .registry(source.label()),
+                });
+            }
+        };
         if lp.commit.is_some() {
             offer.commit = lp.commit.clone();
+        }
+        // The folder the package was installed from, which the default
+        // branch may have moved since.
+        if lp.path.is_some() {
+            offer.path = lp.path.clone();
         }
         Ok(offer)
     }
@@ -1128,6 +1174,7 @@ impl Client {
             );
         }
         let packages = self.write(dir, &mut lock, prepared, &previous, false)?;
+        warnings.extend(self.source_warnings());
         Ok(Report {
             dir: dir.to_path_buf(),
             packages,
@@ -1137,7 +1184,7 @@ impl Client {
 
     /// Every package the registries offer: about, versions, installed,
     /// updatable, held until.
-    pub async fn offered(&self, dir: &Path) -> Result<Vec<Offered>> {
+    pub async fn offered(&self, dir: &Path) -> Result<Listing> {
         let lock = Lock::load(dir)?;
         let installed = self.read_installed(dir, &lock)?;
         let resolver = self.new_resolver(Seen::load(dir)?, &installed);
@@ -1163,12 +1210,15 @@ impl Client {
         if reached == 0 && !errors.is_empty() {
             return Err(errors.remove(0));
         }
+        let mut warnings: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
 
         let mut out = Vec::new();
         for (idx, name) in found {
             let Ok(offers) = resolver.listing(idx, &name).await else {
                 continue;
             };
+            // A version the registry would refuse is not offered.
+            let offers: Vec<&Offer> = offers.iter().filter(|o| !o.needs_signature).collect();
             if offers.is_empty() {
                 continue;
             }
@@ -1219,7 +1269,11 @@ impl Client {
         out.sort_by(|a, b| a.name.cmp(&b.name));
         // The records help later runs; a folder that cannot be written does not stop a listing.
         let _ = resolver.save_seen(dir);
-        Ok(out)
+        warnings.extend(self.source_warnings());
+        Ok(Listing {
+            packages: out,
+            warnings,
+        })
     }
 
     /// Resolves, verifies, unpacks and locks a package and its dependencies.
@@ -1385,6 +1439,7 @@ impl Client {
             prepared.push(p);
         }
         let packages = self.write(dir, &mut lock, prepared, &previous, true)?;
+        warnings.extend(self.source_warnings());
         Ok(Report {
             dir: dir.to_path_buf(),
             packages,

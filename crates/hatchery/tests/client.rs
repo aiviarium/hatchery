@@ -612,7 +612,7 @@ fn requirements_and_min_age_apply_to_registries() {
     let opts = hatchery::Options { allow_young: true };
     block_on(client.add_with(&spec("demo/a"), &env.dir("p"), &opts)).unwrap();
 
-    let listed = block_on(client.offered(&env.dir("q"))).unwrap();
+    let listed = block_on(client.offered(&env.dir("q"))).unwrap().packages;
     assert_eq!(
         listed[0].held_until,
         Some(Timestamp::parse("2026-11-20T00:00:00Z").unwrap())
@@ -629,7 +629,7 @@ fn offered_lists_names_versions_and_what_is_installed() {
     publish(&env.reg(), &env.work(), "v", "1.0.0", &[], true);
     let dir = env.dir("p");
     let client = env.client();
-    let listed = block_on(client.offered(&dir)).unwrap();
+    let listed = block_on(client.offered(&dir)).unwrap().packages;
     assert_eq!(listed.len(), 2);
     let a = &listed[0];
     assert_eq!(a.name, name("demo/a"));
@@ -646,7 +646,7 @@ fn offered_lists_names_versions_and_what_is_installed() {
         StaticTarget::new("other"),
         "",
     );
-    let listed_other = block_on(other.offered(&env.dir("q"))).unwrap();
+    let listed_other = block_on(other.offered(&env.dir("q"))).unwrap().packages;
     assert!(
         listed_other[0].versions[0]
             .problem
@@ -656,7 +656,7 @@ fn offered_lists_names_versions_and_what_is_installed() {
     );
 
     block_on(client.add(&spec("demo/a@1.0.0"), &dir)).unwrap();
-    let listed = block_on(client.offered(&dir)).unwrap();
+    let listed = block_on(client.offered(&dir)).unwrap().packages;
     assert_eq!(listed[0].installed, Some(Version::new(1, 0, 0)));
     assert_eq!(listed[0].updatable, Some(Version::new(1, 1, 0)));
 }
@@ -895,7 +895,7 @@ fn credentials_in_git_addresses_stay_out_of_listings_errors_and_records() {
         &format!("registries {{\n  git \"{url}\" min-age=\"3d\"\n}}\n"),
     );
     let dir = env.dir("p");
-    let offered = block_on(client.offered(&dir)).unwrap();
+    let offered = block_on(client.offered(&dir)).unwrap().packages;
     assert_eq!(offered.len(), 1);
     assert!(!offered[0].registry.contains("s3cret"), "{offered:?}");
     let err = block_on(client.add(&spec("example/alpha"), &dir)).unwrap_err();
@@ -906,4 +906,211 @@ fn credentials_in_git_addresses_stay_out_of_listings_errors_and_records() {
     let seen = fs::read_to_string(dir.join(".hatchery/seen.toml")).unwrap();
     assert!(seen.contains("file://localhost"), "{seen}");
     assert!(!seen.contains("s3cret"), "{seen}");
+}
+
+/// A repository whose packages are `example/<id>` in `agents/<id>`, with
+/// tags `v<version>` shared by all of them.
+struct Repo {
+    dir: PathBuf,
+}
+
+impl Repo {
+    fn new(env: &Env) -> Repo {
+        let dir = env.root.join("repo");
+        common::git_init(&dir);
+        common::write(
+            &dir,
+            "packages.kdl",
+            "format 1\ndefaults {\n  package {\n    group example\n  }\n}\npackages {\n  find \"agents/*\"\n}\nrelease {\n  tag \"v{version}\"\n  eggs branch=\"eggs\"\n}\n",
+        );
+        Repo { dir }
+    }
+
+    /// Writes package `id` at `version` in `folder` (under the repository).
+    fn put(&self, folder: &str, id: &str, version: &str) {
+        common::package(
+            &self.dir.join(folder),
+            &format!(
+                "format 1\npackage {{\n id {id}\n version \"{version}\"\n}}\ntargets {{\n crow {{\n }}\n}}\n"
+            ),
+            &[("crow/plugin.json", &format!("{{\"v\":\"{version}\"}}"))],
+        );
+    }
+
+    fn commit_tag(&self, tag: &str) -> String {
+        let c = common::git_commit(&self.dir, tag);
+        common::git(&self.dir, &["tag", tag]);
+        c
+    }
+
+    fn url(&self) -> String {
+        self.dir.display().to_string()
+    }
+}
+
+fn plugin(dir: &Path, name: &str) -> String {
+    fs::read_to_string(dir.join(name).join("crow/plugin.json")).unwrap()
+}
+
+#[test]
+fn a_keyed_git_registry_does_not_install_a_version_that_has_only_a_tag() {
+    let env = Env::new();
+    let repo = Repo::new(&env);
+    repo.put("agents/alpha", "alpha", "1.0.0");
+    repo.commit_tag("v1.0.0");
+    // 1.0.0 is published signed; 1.1.0 is only a tag anyone could push.
+    let key = hatchery::SigningKey::from_bytes(&[9; 32]);
+    let work = env.dir("built");
+    common::package(
+        &work,
+        "format 1\npackage {\n group example\n id alpha\n version \"1.0.0\"\n}\ntargets {\n crow {\n }\n}\n",
+        &[("crow/plugin.json", "{\"v\":\"1.0.0\"}")],
+    );
+    let opts = PackOptions {
+        no_build: true,
+        ..PackOptions::default()
+    };
+    let egg = pack(&work, &opts).unwrap().pop().unwrap();
+    hatchery::source::git::publish_branch(
+        &egg,
+        &repo.url(),
+        "eggs",
+        None,
+        Some(&key),
+        Timestamp::parse(NOW).unwrap(),
+        &common::isolated_git(),
+    )
+    .unwrap();
+    repo.put("agents/alpha", "alpha", "1.1.0");
+    repo.commit_tag("v1.1.0");
+
+    let public = hatchery::sign::format_verifying_key(&key.verifying_key());
+    let line = |extra: &str| {
+        format!(
+            "registries {{\n  git \"{}\" key=\"{public}\" min-age=\"0d\"{extra}\n}}\n",
+            repo.url()
+        )
+    };
+    let client = git_client(&env, &line(""));
+    let dir = env.dir("p");
+    let listing = block_on(client.offered(&dir)).unwrap();
+    let versions: Vec<String> = listing.packages[0]
+        .versions
+        .iter()
+        .map(|v| v.version.to_string())
+        .collect();
+    assert_eq!(versions, ["1.0.0"]);
+    let report = block_on(client.add(&spec("example/alpha"), &dir)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 0, 0));
+    assert_eq!(plugin(&dir, "example/alpha"), "{\"v\":\"1.0.0\"}");
+    let err = block_on(client.add(&spec("example/alpha@1.1.0"), &dir)).unwrap_err();
+    assert!(matches!(err, Error::SignatureInvalid { .. }), "{err}");
+    assert!(err.to_string().contains("only a tag"), "{err}");
+
+    // A registry line can allow tags again.
+    let client = git_client(&env, &line(" unsigned-tags=#true"));
+    let report = block_on(client.add(&spec("example/alpha@1.1.0"), &dir)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 1, 0));
+}
+
+#[test]
+fn a_broken_package_does_not_hide_the_others_of_a_git_registry() {
+    let env = Env::new();
+    let repo = Repo::new(&env);
+    repo.put("agents/alpha", "alpha", "1.0.0");
+    common::write(
+        &repo.dir,
+        "agents/broken/package.kdl",
+        "format 1\npackage {\n id\n}\n",
+    );
+    repo.commit_tag("v1.0.0");
+    let client = git_client(
+        &env,
+        &format!("registries {{\n  git \"{}\"\n}}\n", repo.url()),
+    );
+    let dir = env.dir("p");
+    let listing = block_on(client.offered(&dir)).unwrap();
+    assert_eq!(listing.packages.len(), 1);
+    assert!(
+        listing.warnings.iter().any(|w| w.contains("agents/broken")),
+        "{:?}",
+        listing.warnings
+    );
+    let report = block_on(client.add(&spec("example/alpha"), &dir)).unwrap();
+    assert!(
+        report.warnings.iter().any(|w| w.contains("agents/broken")),
+        "{:?}",
+        report.warnings
+    );
+    let err = block_on(client.add(&spec("example/broken"), &dir)).unwrap_err();
+    assert!(matches!(err, Error::Invalid { .. }), "{err}");
+    assert!(err.to_string().contains("agents/broken"), "{err}");
+}
+
+#[test]
+fn a_package_moved_or_removed_on_the_default_branch_still_installs_from_its_tag() {
+    let env = Env::new();
+    let repo = Repo::new(&env);
+    repo.put("agents/alpha", "alpha", "1.0.0");
+    repo.commit_tag("v1.0.0");
+    let client = || {
+        git_client(
+            &env,
+            &format!("registries {{\n  git \"{}\"\n}}\n", repo.url()),
+        )
+    };
+    let dir = env.dir("p");
+    block_on(client().add(&spec("example/alpha"), &dir)).unwrap();
+
+    let install_fresh = |name: &str| {
+        let fresh = env.dir(name);
+        fs::create_dir_all(&fresh).unwrap();
+        fs::copy(dir.join("eggs.lock"), fresh.join("eggs.lock")).unwrap();
+        block_on(client().install(&fresh)).unwrap();
+        plugin(&fresh, "example/alpha")
+    };
+
+    // Moved to another folder on the default branch.
+    common::git(&repo.dir, &["mv", "agents/alpha", "agents/moved"]);
+    common::git_commit(&repo.dir, "move");
+    assert_eq!(install_fresh("moved"), "{\"v\":\"1.0.0\"}");
+    // A version resolved now is read where the package was at its tag.
+    let other = env.dir("other");
+    let report = block_on(client().add(&spec("example/alpha@1.0.0"), &other)).unwrap();
+    assert_eq!(report.packages[0].version, Version::new(1, 0, 0));
+
+    // Removed from the default branch.
+    common::git(&repo.dir, &["rm", "-rq", "agents/moved"]);
+    common::git_commit(&repo.dir, "remove");
+    assert_eq!(install_fresh("removed"), "{\"v\":\"1.0.0\"}");
+}
+
+#[test]
+fn a_shared_tag_counts_only_for_packages_at_that_version() {
+    let env = Env::new();
+    let repo = Repo::new(&env);
+    repo.put("agents/alpha", "alpha", "1.0.0");
+    repo.commit_tag("v1.0.0");
+    repo.put("agents/beta", "beta", "2.0.0");
+    repo.commit_tag("v2.0.0");
+    let client = git_client(
+        &env,
+        &format!("registries {{\n  git \"{}\"\n}}\n", repo.url()),
+    );
+    let listing = block_on(client.offered(&env.dir("p"))).unwrap();
+    let newest: Vec<(String, String)> = listing
+        .packages
+        .iter()
+        .map(|o| (o.name.to_string(), o.versions[0].version.to_string()))
+        .collect();
+    assert_eq!(
+        newest,
+        [
+            ("example/alpha".to_string(), "1.0.0".to_string()),
+            ("example/beta".to_string(), "2.0.0".to_string())
+        ]
+    );
+    for o in &listing.packages {
+        assert_eq!(o.versions.len(), 1, "{o:?}");
+    }
 }

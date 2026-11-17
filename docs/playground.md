@@ -15,7 +15,7 @@ The script builds `hatchery` and writes the folder. Sourcing `env.sh` puts that 
 | --- | --- |
 | `aviary.git` | The repository, as a hosting service would hold it. It has the tags `v1.0.0` and `v1.1.0`, and an `eggs` branch with built, signed eggs |
 | `aviary/` | A checkout of it, where you edit and release packages |
-| `hatchery.kdl` | The configuration, with `aviary.git` as its one registry |
+| `hatchery.kdl` | The configuration, with `aviary.git` as its one registry, its public key and `unsigned-tags=#true` |
 | `sign.key` | The signing key of the playground. `env.sh` exports it as `HATCHERY_SIGN_KEY` |
 
 The repository has two packages, both in the group `example`:
@@ -26,6 +26,8 @@ The repository has two packages, both in the group `example`:
 | `toolbox` | `crow`, `rookery` | A dependency on `hello`, a build command, requirements, and variants for two architectures |
 
 The sources are in [examples/aviary](../examples/aviary).
+
+The registry line has the playground's public key, so the eggs of `toolbox` must be signed by it. `hello` has no build, so nothing is packed or signed for it. Its tag is its release, and a registry with a key refuses a version that has only a tag. The line says `unsigned-tags=#true` to allow it. Anyone who can push a tag to the repository can then release `hello`, so leave the property out for a registry whose packages all publish signed eggs.
 
 ## Install and update
 
@@ -126,7 +128,8 @@ Leave out the `pack` and `publish` step to see what a missing build looks like. 
 | Add `min-age="3d"` to the line in `hatchery.kdl`, then `add` into a new folder | Versions are held, and `list --offered` shows until when. `--allow-young` installs anyway |
 | Add `withdrawn toolbox "1.1.0"` to `release` in `aviary/packages.kdl`, commit and push | 1.1.0 is skipped when resolving. Where it is installed it stays, and `update` warns about it |
 | Move a tag: `git -C aviary tag -f v1.1.0 && git -C aviary push -f origin v1.1.0` after a new commit | An install from a lock that has the old commit is refused |
-| Change `key=` in `hatchery.kdl` to another public key from `hatchery keygen` | The eggs of `toolbox` are refused, because their signature does not match. `hello` still installs: it has no egg, and comes from its tag |
+| Change `key=` in `hatchery.kdl` to another public key from `hatchery keygen` | The eggs of `toolbox` are refused, because their signature does not match. `hello` still installs, from its tag, because the line allows unsigned tags |
+| Remove `unsigned-tags=#true` from the line in `hatchery.kdl` | `hello` is refused, because it has only a tag and the registry requires signed eggs. `toolbox` still installs for `rookery` from its signed egg. For `crow` it needs `hello`, so it fails too |
 | Edit a file under `plugins/`, then run `install` | The folder is as you left it. `install` checks eggs when it unpacks them, not folders afterwards |
 
 ## Check the playground

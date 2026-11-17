@@ -352,12 +352,18 @@ fn a_tag_whose_manifest_has_another_version_is_an_error() {
     git(&f.work, &["push", "-q", "origin", "v9.9.9"]);
     let reg = f.registry();
     let a = versions(&reg, &alpha());
-    let err = block_on(reg.details(offer(&a, "9.9.9"))).unwrap_err();
+    // The pattern is shared by every package, so a tag counts for a package
+    // only where its manifest has the tag's version.
+    assert!(a.iter().all(|o| o.version.to_string() != "9.9.9"), "{a:?}");
+    let mut wrong = offer(&a, "1.2.0").clone();
+    wrong.version = "9.9.9".parse().unwrap();
+    wrong.git_ref = Some("v9.9.9".into());
+    let err = block_on(reg.details(&wrong)).unwrap_err();
     assert!(matches!(err, Error::Invalid { .. }), "{err}");
     let text = err.to_string();
     assert!(text.contains("9.9.9") && text.contains("1.2.0"), "{text}");
     // Fetching refuses it too.
-    assert!(block_on(reg.fetch(offer(&a, "9.9.9"))).is_err());
+    assert!(block_on(reg.fetch(&wrong)).is_err());
 }
 
 #[test]
@@ -527,7 +533,17 @@ fn built_eggs_are_looked_up_first() {
     assert_eq!(got.sha256(), egg.sha256());
     assert!(got.entries().iter().any(|e| e.path == "crow/dist/built.js"));
 
-    // The source of another version still comes from its tag.
+    // A version with only a tag is refused, because the registry has a key.
+    assert!(src.needs_signature);
+    let err = block_on(reg.fetch(src)).unwrap_err();
+    assert!(matches!(err, Error::SignatureInvalid { .. }), "{err}");
+    assert!(err.to_string().contains("only a tag"), "{err}");
+
+    // With unsigned tags allowed, the source of another version comes from its tag.
+    let reg = f.keyed(&key.verifying_key()).unsigned_tags(true);
+    let a = versions(&reg, &alpha());
+    let src = offer(&a, "1.1.0");
+    assert!(!src.needs_signature);
     let from_tag = block_on(reg.fetch(src)).unwrap();
     assert!(
         !from_tag

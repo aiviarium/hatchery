@@ -47,6 +47,9 @@ pub struct RegistryConfig {
     pub min_age: Option<Duration>,
     /// The environment variable that carries a token.
     pub token_env: Option<String>,
+    /// For a `git` registry with a `key`: whether versions that have only a
+    /// tag, and so no signed egg, are still installed. False by default.
+    pub unsigned_tags: bool,
     /// Every other property, for kinds a tool adds.
     pub props: BTreeMap<String, String>,
 }
@@ -61,6 +64,7 @@ impl RegistryConfig {
             key: None,
             min_age: None,
             token_env: None,
+            unsigned_tags: false,
             props: BTreeMap::new(),
         }
     }
@@ -93,6 +97,9 @@ impl RegistryConfig {
         }
         if let Some(t) = &self.token_env {
             n = kdlx::with_prop(n, "token-env", t.as_str());
+        }
+        if self.unsigned_tags {
+            n = kdlx::with_prop(n, "unsigned-tags", true);
         }
         for (k, v) in &self.props {
             n.entries_mut()
@@ -136,6 +143,12 @@ fn parse_registry(n: &KdlNode, what: &str) -> Result<RegistryConfig> {
 fn parse_registry_line(n: &KdlNode, what: &str) -> Result<RegistryConfig> {
     let mut r = RegistryConfig::new(kdlx::name(n), kdlx::one_string(n, what)?);
     for (k, v) in kdlx::props(n) {
+        if k == "unsigned-tags" {
+            r.unsigned_tags = v
+                .as_bool()
+                .ok_or_else(|| Error::invalid(what, "unsigned-tags= must be #true or #false"))?;
+            continue;
+        }
         let v =
             kdlx::text(v).ok_or_else(|| Error::invalid(what, format!("{k}= must be a string")))?;
         match k {

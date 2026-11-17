@@ -210,7 +210,11 @@ pub fn list(config: Option<&Path>, a: List) -> Res {
 }
 
 fn offered(client: &Client, a: &List) -> Res {
-    let list = hatchery::block_on(client.offered(&a.dir))?;
+    let listing = hatchery::block_on(client.offered(&a.dir))?;
+    for w in &listing.warnings {
+        eprintln!("warning: {w}");
+    }
+    let list = &listing.packages;
     if a.json {
         let items: Vec<_> = list
             .iter()
@@ -253,17 +257,26 @@ fn offered(client: &Client, a: &List) -> Res {
         "HELD UNTIL".to_string(),
         "REGISTRY".to_string(),
     ]];
-    for o in &list {
+    for o in list {
+        // A withdrawn version says so wherever it is shown.
+        let shown = |v: &hatchery::semver::Version| {
+            let withdrawn = o
+                .versions
+                .iter()
+                .any(|x| x.version == *v && x.withdrawn.is_some());
+            if withdrawn {
+                format!("{v} (withdrawn)")
+            } else {
+                v.to_string()
+            }
+        };
         rows.push(vec![
             o.name.to_string(),
             o.versions
                 .first()
-                .map(|v| v.version.to_string())
+                .map(|v| shown(&v.version))
                 .unwrap_or_default(),
-            o.installed
-                .as_ref()
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
+            o.installed.as_ref().map(shown).unwrap_or_default(),
             o.updatable
                 .as_ref()
                 .map(|v| v.to_string())

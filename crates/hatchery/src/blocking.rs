@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::block_on;
-use crate::client::{Fetched, Installed, Offered, Options, Report};
+use crate::client::{Fetched, Installed, Listing, Options, Report};
 use crate::error::Result;
 use crate::name::{Name, Spec};
 use crate::platform::Platform;
@@ -31,7 +31,7 @@ impl Client {
     }
 
     /// See [`crate::Client::offered`].
-    pub fn offered(&self, dir: &Path) -> Result<Vec<Offered>> {
+    pub fn offered(&self, dir: &Path) -> Result<Listing> {
         block_on(self.inner.offered(dir))
     }
 

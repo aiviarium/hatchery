@@ -14,7 +14,10 @@ use semver::Version;
 use crate::egg::Egg;
 use crate::error::{At, Error, IoContext, Result};
 use crate::fetch::BoxFuture;
-use crate::git::{Git, Remote, Scratch, checkout_package, join_path, manifest_at, pack_checkout};
+use crate::git::{
+    Git, Remote, RepoCache, Scratch, checkout_package, join_path, manifest_at, pack_checkout,
+};
+use crate::manifest::Manifest;
 use crate::name::Name;
 use crate::publish::{Published, publish_dir};
 use crate::repo::{self, RepoManifest, version_from_tag};
@@ -32,15 +35,25 @@ pub struct GitRegistry {
     cache: PathBuf,
     git: Git,
     key: Option<VerifyingKey>,
+    unsigned_tags: bool,
     root: Mutex<Option<Arc<Root>>>,
-    details: Mutex<HashMap<(String, String), Details>>,
+    /// The details of a package at a commit.
+    details: Mutex<HashMap<(String, Name), Details>>,
+    /// Where a package is at a commit, and its manifest. None when the
+    /// commit has no such package.
+    found: Mutex<HashMap<(String, Name), Option<Found>>>,
 }
+
+/// A package's folder at a commit, and its manifest there.
+type Found = (String, Manifest);
 
 /// What `packages.kdl` of the default branch says, at one commit.
 struct Root {
     commit: String,
     manifest: RepoManifest,
     packages: Vec<Pkg>,
+    /// Package folders whose `package.kdl` does not parse.
+    broken: Vec<Broken>,
 }
 
 struct Pkg {
@@ -49,9 +62,23 @@ struct Pkg {
     tag: String,
 }
 
+struct Broken {
+    path: String,
+    what: String,
+    message: String,
+}
+
+impl Broken {
+    fn error(&self) -> Error {
+        Error::invalid(&self.what, &self.message)
+    }
+}
+
 impl GitRegistry {
     /// `cache` is the folder for this crate's git caches; each repository
-    /// gets its own folder in it. `key` is required of built eggs.
+    /// gets its own folder in it. With a `key`, built eggs must be signed by
+    /// it, and versions that have only a tag are not installed unless
+    /// [`GitRegistry::unsigned_tags`] allows them.
     pub fn new(
         url: impl Into<String>,
         cache: impl Into<PathBuf>,
@@ -65,9 +92,26 @@ impl GitRegistry {
             cache: cache.into(),
             git,
             key,
+            unsigned_tags: false,
             root: Mutex::new(None),
             details: Mutex::new(HashMap::new()),
+            found: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Whether a registry with a key still installs versions that have only
+    /// a tag, from source and unsigned. False by default. It is the
+    /// `unsigned-tags` property of a registry line. Without a key it changes
+    /// nothing.
+    #[must_use]
+    pub fn unsigned_tags(mut self, allow: bool) -> GitRegistry {
+        self.unsigned_tags = allow;
+        self
+    }
+
+    /// Whether a version that has only a tag is refused.
+    fn tags_need_signature(&self) -> bool {
+        self.key.is_some() && !self.unsigned_tags
     }
 
     /// The address without credentials, for messages.
@@ -80,7 +124,9 @@ impl GitRegistry {
     }
 
     /// The root manifest and the packages of the default branch. Reads the
-    /// repository only when the branch has a new commit.
+    /// repository only when the branch has a new commit. A package whose
+    /// `package.kdl` does not parse is set aside, so that one bad folder
+    /// does not hide the others.
     fn root(&self, remote: &Remote) -> Result<Arc<Root>> {
         let branch = remote.default_branch.as_deref().ok_or_else(|| {
             Error::invalid(
@@ -124,19 +170,28 @@ impl GitRegistry {
             })?;
         let dirs = cache.manifest_dirs(&commit)?;
         let mut packages = Vec::new();
+        let mut broken = Vec::new();
         for p in manifest.package_dirs(&dirs) {
-            let (m, _) = manifest_at(&cache, &commit, Some(&p.path))?;
-            packages.push(Pkg {
-                name: m.name(),
-                path: p.path,
-                tag: p.tag,
-            });
+            match manifest_at(&cache, &commit, Some(&p.path)) {
+                Ok((m, _)) => packages.push(Pkg {
+                    name: m.name(),
+                    path: p.path,
+                    tag: p.tag,
+                }),
+                Err(Error::Invalid { what, message }) => broken.push(Broken {
+                    path: p.path,
+                    what,
+                    message,
+                }),
+                Err(e) => return Err(e),
+            }
         }
         drop(cache);
         let root = Arc::new(Root {
             commit,
             manifest,
             packages,
+            broken,
         });
         *self.root.lock().unwrap() = Some(root.clone());
         Ok(root)
@@ -173,6 +228,23 @@ impl GitRegistry {
         root.packages.iter().find(|p| p.name == *name)
     }
 
+    /// The error of a set-aside package folder that looks like the one
+    /// asked for: its folder has the package's id as its name.
+    fn broken_for<'a>(root: &'a Root, name: &Name) -> Option<&'a Broken> {
+        root.broken
+            .iter()
+            .find(|b| b.path.rsplit('/').next() == Some(name.id.as_str()))
+    }
+
+    fn moved(&self, offer: &Offer, tag: &str, locked: &str, now: Option<&String>) -> Error {
+        Error::TagMoved {
+            at: self.at(&offer.name, &offer.version),
+            tag: tag.to_string(),
+            locked: locked.to_string(),
+            now: now.cloned().unwrap_or_else(|| "(no such tag)".into()),
+        }
+    }
+
     /// A built offer that came with a tag must still have the tag where it
     /// was.
     fn check_tag(&self, offer: &Offer) -> Result<()> {
@@ -182,53 +254,133 @@ impl GitRegistry {
         let remote = self.git.ls_remote(&self.url)?;
         match remote.tags.get(tag) {
             Some(now) if now == commit => Ok(()),
-            other => Err(Error::TagMoved {
-                at: self.at(&offer.name, &offer.version),
-                tag: tag.clone(),
-                locked: commit.clone(),
-                now: other.cloned().unwrap_or_else(|| "(no such tag)".into()),
-            }),
+            other => Err(self.moved(offer, tag, commit, other)),
         }
     }
 
-    fn fetch_source(&self, offer: &Offer, variant: Option<(&str, &str)>) -> Result<Egg> {
-        let (Some(tag), Some(commit), Some(path)) = (&offer.git_ref, &offer.commit, &offer.path)
-        else {
+    /// Makes sure the cache has the commit of a tag, and that the tag still
+    /// points at it.
+    fn ensure_tag(&self, cache: &RepoCache, offer: &Offer, tag: &str, commit: &str) -> Result<()> {
+        if cache.has_commit(commit) {
+            return Ok(());
+        }
+        let got = cache.fetch_tag(tag)?;
+        if got != commit {
+            return Err(self.moved(offer, tag, commit, Some(&got)));
+        }
+        Ok(())
+    }
+
+    /// The folder and the manifest of a package at a commit the cache has.
+    /// The folder `hint` is tried first; otherwise every package folder of
+    /// the commit's own `packages.kdl` is read. None when the commit has no
+    /// package of that name. A package can move between releases, so the
+    /// default branch does not say where it was at a tag.
+    fn find_at(
+        &self,
+        cache: &RepoCache,
+        commit: &str,
+        name: &Name,
+        hint: Option<&str>,
+    ) -> Result<Option<(String, Manifest)>> {
+        let key = (commit.to_string(), name.clone());
+        if let Some(found) = self.found.lock().unwrap().get(&key) {
+            return Ok(found.clone());
+        }
+        let named = |path: &str| -> Result<Option<Manifest>> {
+            match manifest_at(cache, commit, Some(path)) {
+                Ok((m, _)) if m.name() == *name => Ok(Some(m)),
+                Ok(_) | Err(Error::Invalid { .. }) => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        let mut found = None;
+        if let Some(h) = hint {
+            found = named(h)?.map(|m| (h.to_string(), m));
+        }
+        if found.is_none()
+            && let Some(text) = cache.show(commit, repo::FILE)?
+            && let Ok(manifest) = RepoManifest::parse(&String::from_utf8_lossy(&text))
+        {
+            for p in manifest.package_dirs(&cache.manifest_dirs(commit)?) {
+                if Some(p.path.as_str()) == hint {
+                    continue;
+                }
+                if let Some(m) = named(&p.path)? {
+                    found = Some((p.path, m));
+                    break;
+                }
+            }
+        }
+        self.found.lock().unwrap().insert(key, found.clone());
+        Ok(found)
+    }
+
+    /// Where the package of an offer from a tag is at its commit, and its
+    /// manifest, checked against the offer's version.
+    fn locate(&self, cache: &RepoCache, offer: &Offer) -> Result<(String, Manifest)> {
+        let (Some(tag), Some(commit)) = (&offer.git_ref, &offer.commit) else {
             return Err(Error::other(format!(
-                "{} {}: the offer has no tag, commit or folder",
+                "{} {}: the offer has no tag or commit",
                 offer.name, offer.version
             )));
         };
+        self.ensure_tag(cache, offer, tag, commit)?;
+        let (path, m) = self
+            .find_at(cache, commit, &offer.name, offer.path.as_deref())?
+            .ok_or_else(|| {
+                Error::invalid(
+                    self.at(&offer.name, &offer.version),
+                    format!("tag {tag} has no package {}", offer.name),
+                )
+            })?;
+        if m.package.version != offer.version {
+            return Err(Error::invalid(
+                join_path(Some(&path), crate::manifest::FILE),
+                format!(
+                    "tag {tag} is version {} of {}, but package.kdl at that commit says {} {}",
+                    offer.version,
+                    offer.name,
+                    m.name(),
+                    m.package.version
+                ),
+            ));
+        }
+        Ok((path, m))
+    }
+
+    fn fetch_source(&self, offer: &Offer, variant: Option<(&str, &str)>) -> Result<Egg> {
+        let (Some(tag), Some(commit)) = (&offer.git_ref, &offer.commit) else {
+            return Err(Error::other(format!(
+                "{} {}: the offer has no tag or commit",
+                offer.name, offer.version
+            )));
+        };
+        if self.tags_need_signature() {
+            return Err(Error::SignatureInvalid {
+                at: self.at(&offer.name, &offer.version),
+                reason: crate::source::TAG_ONLY.to_string(),
+            });
+        }
         let remote = self.git.ls_remote(&self.url)?;
         match remote.tags.get(tag) {
             Some(now) if now == commit => {}
-            other => {
-                return Err(Error::TagMoved {
-                    at: self.at(&offer.name, &offer.version),
-                    tag: tag.clone(),
-                    locked: commit.clone(),
-                    now: other.cloned().unwrap_or_else(|| "(no such tag)".into()),
-                });
-            }
+            other => return Err(self.moved(offer, tag, commit, other)),
         }
-        let checkout = {
+        let (checkout, path) = {
             let cache = self.git.cache(&self.cache, &self.url)?;
             let got = cache.fetch_tag(tag)?;
             if got != *commit {
-                return Err(Error::TagMoved {
-                    at: self.at(&offer.name, &offer.version),
-                    tag: tag.clone(),
-                    locked: commit.clone(),
-                    now: got,
-                });
+                return Err(self.moved(offer, tag, commit, Some(&got)));
             }
-            checkout_package(&cache, commit, Some(path))?
+            let (path, _) = self.locate(&cache, offer)?;
+            (checkout_package(&cache, commit, Some(&path))?, path)
         };
         let egg = pack_checkout(&checkout, &self.url, commit, variant)?;
         let m = egg.manifest();
         if m.name() != offer.name || m.package.version != offer.version {
             return Err(Error::invalid(
-                join_path(Some(path), crate::manifest::FILE),
+                join_path(Some(&path), crate::manifest::FILE),
                 format!(
                     "tag {tag} is {} {}, but the package at that commit is {} {}",
                     offer.name,
@@ -239,6 +391,49 @@ impl GitRegistry {
             ));
         }
         Ok(egg)
+    }
+
+    /// Of tags that share one pattern among several packages, the ones at
+    /// which this package has the tag's version. A tag `v2.0.0` made for
+    /// one package says nothing of another.
+    fn own_tags(
+        &self,
+        name: &Name,
+        pkg: &Pkg,
+        tags: &mut Vec<(String, String, Version)>,
+    ) -> Result<()> {
+        if tags.is_empty() {
+            return Ok(());
+        }
+        let cache = self.git.cache(&self.cache, &self.url)?;
+        let missing: Vec<&str> = tags
+            .iter()
+            .filter(|(_, c, _)| {
+                !self
+                    .found
+                    .lock()
+                    .unwrap()
+                    .contains_key(&(c.clone(), name.clone()))
+                    && !cache.has_commit(c)
+            })
+            .map(|(t, _, _)| t.as_str())
+            .collect();
+        cache.fetch_tags(&missing)?;
+        let mut kept = Vec::new();
+        for (tag, commit, version) in tags.drain(..) {
+            // A tag that moved since the listing is left for the fetch to refuse.
+            if !cache.has_commit(&commit) {
+                kept.push((tag, commit, version));
+                continue;
+            }
+            if let Some((_, m)) = self.find_at(&cache, &commit, name, Some(&pkg.path))?
+                && m.package.version == version
+            {
+                kept.push((tag, commit, version));
+            }
+        }
+        *tags = kept;
+        Ok(())
     }
 }
 
@@ -259,13 +454,27 @@ impl Source for GitRegistry {
         })
     }
 
+    fn warnings(&self) -> Vec<String> {
+        let root = self.root.lock().unwrap().clone();
+        root.map(|r| {
+            r.broken
+                .iter()
+                .map(|b| format!("{}: skipped {}: {}", self.label, b.path, b.error()))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
     fn versions<'a>(&'a self, name: &'a Name) -> BoxFuture<'a, Result<Vec<Offer>>> {
         Box::pin(async move {
             let remote = self.git.ls_remote(&self.url)?;
             let root = self.root(&remote)?;
-            let Some(pkg) = Self::package(&root, name) else {
-                return Ok(Vec::new());
-            };
+            let pkg = Self::package(&root, name);
+            if pkg.is_none()
+                && let Some(b) = Self::broken_for(&root, name)
+            {
+                return Err(b.error());
+            }
 
             let mut built: BTreeMap<Version, Offer> = BTreeMap::new();
             if let Some(eggs) = self.eggs(&remote, &root)? {
@@ -273,24 +482,55 @@ impl Source for GitRegistry {
                     built.insert(o.version.clone(), o);
                 }
             }
+            // A package that left the default branch keeps its built eggs.
+            let Some(pkg) = pkg else {
+                let mut out: Vec<Offer> = built.into_values().collect();
+                for o in &mut out {
+                    o.registry = self.label.clone();
+                }
+                self.mark_withdrawn(&root, name, &mut out);
+                return Ok(out);
+            };
+
+            let mut tags: Vec<(String, String, Version)> = Vec::new();
+            for (tag, commit) in &remote.tags {
+                if let Some(version) = version_from_tag(&pkg.tag, &name.id, tag) {
+                    tags.push((tag.clone(), commit.clone(), version));
+                }
+            }
+            if !pkg.tag.contains("{id}") {
+                let (mut alone, with_egg): (Vec<_>, Vec<_>) = tags
+                    .into_iter()
+                    .partition(|(_, _, v)| !built.contains_key(v));
+                self.own_tags(name, pkg, &mut alone)?;
+                tags = with_egg;
+                tags.extend(alone);
+            }
 
             let mut out = Vec::new();
-            for (tag, commit) in &remote.tags {
-                let Some(version) = version_from_tag(&pkg.tag, &name.id, tag) else {
-                    continue;
-                };
+            for (tag, commit, version) in tags {
                 let mut offer = match built.remove(&version) {
                     Some(o) => o,
                     None => {
                         let mut o = Offer::new(name.clone(), version.clone(), &self.label);
                         o.built = false;
+                        o.needs_signature = self.tags_need_signature();
                         o
                     }
                 };
+                // Where the package is at the tag, when that was looked up.
+                let path = self
+                    .found
+                    .lock()
+                    .unwrap()
+                    .get(&(commit.clone(), name.clone()))
+                    .cloned()
+                    .flatten()
+                    .map(|(p, _)| p);
                 offer.registry = self.label.clone();
-                offer.commit = Some(commit.clone());
-                offer.git_ref = Some(tag.clone());
-                offer.path = Some(pkg.path.clone());
+                offer.commit = Some(commit);
+                offer.git_ref = Some(tag);
+                offer.path = Some(path.unwrap_or_else(|| pkg.path.clone()));
                 out.push(offer);
             }
             // Built eggs whose tag is gone or was never made.
@@ -299,13 +539,7 @@ impl Source for GitRegistry {
                 o.path = Some(pkg.path.clone());
                 out.push(o);
             }
-            for o in &mut out {
-                if let Some(w) = root.manifest.withdrawn(&name.group, &name.id, &o.version) {
-                    o.withdrawn = Some(Withdrawn {
-                        reason: w.reason.clone(),
-                    });
-                }
-            }
+            self.mark_withdrawn(&root, name, &mut out);
             Ok(out)
         })
     }
@@ -315,9 +549,7 @@ impl Source for GitRegistry {
             if let Some(d) = &offer.details {
                 return Ok(d.clone());
             }
-            let (Some(tag), Some(commit), Some(path)) =
-                (&offer.git_ref, &offer.commit, &offer.path)
-            else {
+            let Some(commit) = &offer.commit else {
                 return Err(Error::other(format!(
                     "{} {}: no details from {}",
                     offer.name,
@@ -325,37 +557,14 @@ impl Source for GitRegistry {
                     self.shown()
                 )));
             };
-            let key = (commit.clone(), path.clone());
+            let key = (commit.clone(), offer.name.clone());
             if let Some(d) = self.details.lock().unwrap().get(&key) {
                 return Ok(d.clone());
             }
             let manifest = {
                 let cache = self.git.cache(&self.cache, &self.url)?;
-                if !cache.has_commit(commit) {
-                    let got = cache.fetch_tag(tag)?;
-                    if got != *commit {
-                        return Err(Error::TagMoved {
-                            at: self.at(&offer.name, &offer.version),
-                            tag: tag.clone(),
-                            locked: commit.clone(),
-                            now: got,
-                        });
-                    }
-                }
-                manifest_at(&cache, commit, Some(path))?.0
+                self.locate(&cache, offer)?.1
             };
-            if manifest.name() != offer.name || manifest.package.version != offer.version {
-                return Err(Error::invalid(
-                    join_path(Some(path), crate::manifest::FILE),
-                    format!(
-                        "tag {tag} is version {} of {}, but package.kdl at that commit says {} {}",
-                        offer.version,
-                        offer.name,
-                        manifest.name(),
-                        manifest.package.version
-                    ),
-                ));
-            }
             let d = Details::from_manifest(&manifest);
             self.details.lock().unwrap().insert(key, d.clone());
             Ok(d)
@@ -391,6 +600,16 @@ impl Source for GitRegistry {
 }
 
 impl GitRegistry {
+    fn mark_withdrawn(&self, root: &Root, name: &Name, offers: &mut [Offer]) {
+        for o in offers {
+            if let Some(w) = root.manifest.withdrawn(&name.group, &name.id, &o.version) {
+                o.withdrawn = Some(Withdrawn {
+                    reason: w.reason.clone(),
+                });
+            }
+        }
+    }
+
     fn built_registry(&self, offer: &Offer) -> Result<StaticRegistry> {
         let remote = self.git.ls_remote(&self.url)?;
         let root = self.root(&remote)?;

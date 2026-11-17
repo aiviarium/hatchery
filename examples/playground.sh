@@ -67,8 +67,10 @@ release 1.1.0
 cat > "$dir/hatchery.kdl" <<EOF
 // The registries this playground searches. A folder counts as local, so new
 // versions are not held back. Add min-age="3d" to the line to see the hold.
+// With a key, only signed eggs install. hello has no build and so no egg:
+// its tag is its release, and unsigned-tags=#true lets it install from it.
 registries {
-  git "$dir/aviary.git" key="$public"
+  git "$dir/aviary.git" key="$public" unsigned-tags=#true
 }
 EOF
 

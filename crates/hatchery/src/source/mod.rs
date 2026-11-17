@@ -22,6 +22,11 @@ pub use git_folder::GitFolder;
 pub use local::{FileSource, FolderSource};
 pub use registry::StaticRegistry;
 
+/// Why a version that has only a tag is not installed from a registry
+/// with a key.
+pub(crate) const TAG_ONLY: &str =
+    "the registry requires signed eggs, and this version has only a tag with no signed egg";
+
 /// A place packages are found and fetched.
 pub trait Source: Send + Sync {
     /// A label for messages and the lock file: the registry's address.
@@ -55,6 +60,13 @@ pub trait Source: Send + Sync {
                 ))
             })
         })
+    }
+
+    /// Problems the source skipped over that a person should hear of, such
+    /// as a package it could not read. Empty by default. The client adds
+    /// them to the warnings of its reports and listings.
+    fn warnings(&self) -> Vec<String> {
+        Vec::new()
     }
 
     /// The base egg of an offer, with its checksum and signature verified.
@@ -109,6 +121,10 @@ pub struct Offer {
     /// Display data and targets. None when the source must look them up
     /// with [`Source::details`].
     pub details: Option<Details>,
+    /// Set when the registry requires signed eggs and this version has only
+    /// a tag, so nothing signed. Such a version is never installed, and
+    /// listings leave it out.
+    pub needs_signature: bool,
 }
 
 impl Offer {
@@ -127,6 +143,7 @@ impl Offer {
             git_ref: None,
             path: None,
             details: None,
+            needs_signature: false,
         }
     }
 }
