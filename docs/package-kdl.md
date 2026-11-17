@@ -74,7 +74,7 @@ claude/
 
 | Node | Value | Notes |
 | --- | --- | --- |
-| `group` | A name | Who publishes the package. Letters, digits, `-`, `_` and `.`, not starting with `.` |
+| `group` | A name | Who publishes the package. Letters, digits, `-`, `_` and `.`. It does not start with `.` or `-` or end with `.`, and is not a Windows device name such as `con` |
 | `id` | A name | The same characters |
 | `version` | A complete semver version | One version for the whole package |
 

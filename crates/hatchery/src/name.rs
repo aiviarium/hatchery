@@ -20,7 +20,8 @@ pub struct Name {
 
 /// Checks that a group or an id can be a folder name on every system:
 /// ASCII letters, digits, `-`, `_` and `.`, not starting with `.` or `-`,
-/// and not `eggs.lock`, the lock file beside the group folders.
+/// not ending with `.`, not a Windows device name such as `con`, and not
+/// `eggs.lock`, the lock file beside the group folders.
 pub fn validate_segment(kind: &str, s: &str) -> Result<()> {
     let ok = !s.is_empty()
         && s.len() <= 100
@@ -28,14 +29,15 @@ pub fn validate_segment(kind: &str, s: &str) -> Result<()> {
         && !s.starts_with('-')
         && s != crate::lock::FILE
         && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && crate::archive::component_problem(s).is_none();
     if ok {
         Ok(())
     } else {
         Err(Error::invalid(
             kind,
             format!(
-                "{s:?} must be ASCII letters, digits, '-', '_' or '.', not start with '.' or '-', and not be eggs.lock"
+                "{s:?} must be ASCII letters, digits, '-', '_' or '.', not start with '.' or '-', not end with '.', and not be eggs.lock or a Windows device name"
             ),
         ))
     }

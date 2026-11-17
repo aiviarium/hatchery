@@ -41,6 +41,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - `<dir>/eggs.lock` is TOML, with `format = 1` at the top. `seen.toml` and `unpacked.toml` in `<dir>/.hatchery/` have it too. Unknown keys are kept when Hatchery writes them again.
 - `<dir>/<group>/<id>/` is the unpacked base egg: `package.kdl`, the about files and every target's shared files.
 - `<dir>/<group>/<id>/<target>/variants/<key>/` is each variant that was fetched, unpacked from a variant egg or from inside a fat egg.
+- An install folder refuses a package whose group, or whose id within one group, differs from another only by case. Windows and macOS would put both in one folder. A group or id may not end in a dot or be a Windows device name such as `con`.
 - `<dir>/.hatchery/seen.toml` records when this installation first saw each version in each registry.
 - `<dir>/.hatchery/unpacked.toml` records the base egg checksum of each package folder. `install` skips a package only when the version in its folder and that checksum match the lock. `Installed::version` is the version in the folder.
 

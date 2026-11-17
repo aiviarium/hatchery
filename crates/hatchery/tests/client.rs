@@ -1222,3 +1222,41 @@ fn a_withdrawn_installed_version_is_listed_and_a_skipped_release_is_named() {
     );
     assert!(note.ends_with("installed 1.0.0 instead"), "{note}");
 }
+
+#[test]
+fn names_that_differ_only_by_case_cannot_share_a_folder() {
+    let env = Env::new();
+    let out = env.dir("p");
+    let client = Client::builder()
+        .git(common::isolated_git())
+        .target(crow())
+        .clock(clock())
+        .cache_dir(env.root.join("cache"))
+        .build()
+        .unwrap();
+    let folder = |dir: &str, id: &str| {
+        let dir = env.work().join(dir);
+        common::package(
+            &dir,
+            &manifest(id, "0.1.0", &[], false).replace("group demo", "group Demo"),
+            &[("crow/plugin.json", "{}")],
+        );
+        dir
+    };
+    // A different id in a group spelled the same way is fine.
+    block_on(client.add(&Spec::Folder(folder("a", "one")), &out)).unwrap();
+    block_on(client.add(&Spec::Folder(folder("b", "two")), &out)).unwrap();
+    // `demo` and `Demo` are one folder on Windows and macOS.
+    let dir = env.work().join("c");
+    common::package(
+        &dir,
+        &manifest("three", "0.1.0", &[], false),
+        &[("crow/plugin.json", "{}")],
+    );
+    let err = block_on(client.add(&Spec::Folder(dir), &out)).unwrap_err();
+    assert!(err.to_string().contains("differ only by case"), "{err}");
+    assert!(!out.join("demo").exists());
+    // So are `Demo/one` and `Demo/ONE`.
+    let err = block_on(client.add(&Spec::Folder(folder("d", "ONE")), &out)).unwrap_err();
+    assert!(err.to_string().contains("differ only by case"), "{err}");
+}

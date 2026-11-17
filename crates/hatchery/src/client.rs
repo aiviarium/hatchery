@@ -410,6 +410,24 @@ fn split_variant(s: &str) -> Result<(&str, &str)> {
         .ok_or_else(|| Error::invalid("variant", format!("{s:?} is not <target>.<key>")))
 }
 
+/// Refuses a package whose group or folder differs only by case from that
+/// of another package in the folder: on a system that ignores case, the two
+/// would share a folder.
+fn case_collision(name: &Name, all: &[&Name]) -> Result<()> {
+    for other in all {
+        let group = other.group.eq_ignore_ascii_case(&name.group);
+        let clash = (group && other.group != name.group)
+            || (group && other.id.eq_ignore_ascii_case(&name.id) && *other != name);
+        if clash {
+            return Err(Error::invalid(
+                "package name",
+                format!("{name} and {other} differ only by case, and would share a folder"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn withdrawn_note(name: &Name, version: &Version, w: &Withdrawn) -> String {
     match &w.reason {
         Some(r) => format!("{name} {version} is withdrawn ({r})"),
@@ -1066,6 +1084,15 @@ impl Client {
         previous: &BTreeMap<Name, Version>,
         keep_lock_entry: bool,
     ) -> Result<Vec<Change>> {
+        let names: Vec<&Name> = lock
+            .packages
+            .iter()
+            .map(|l| &l.name)
+            .chain(prepared.iter().map(|p| &p.name))
+            .collect();
+        for p in &prepared {
+            case_collision(&p.name, &names)?;
+        }
         fs::create_dir_all(dir).at_path(dir)?;
         let mut unpacked = Unpacked::load(dir);
         let mut changes = Vec::new();

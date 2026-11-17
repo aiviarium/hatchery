@@ -493,7 +493,7 @@ const DEVICE_NAMES: [&str; 4] = ["con", "prn", "aux", "nul"];
 /// let an egg run code when git runs in the install folder, and the other
 /// names are refused because Windows reads them as something else or
 /// cannot hold them.
-fn component_problem(seg: &str) -> Option<String> {
+pub(crate) fn component_problem(seg: &str) -> Option<String> {
     let lower = seg.to_ascii_lowercase();
     if lower == ".git" || lower == "git~1" {
         return Some("has a .git component".to_string());
