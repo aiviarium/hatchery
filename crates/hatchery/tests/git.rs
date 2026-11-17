@@ -5,8 +5,7 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::{git, git_commit, git_init, package, write};
-use hatchery::git::Git;
+use common::{git, git_commit, git_init, isolated_git, package, write};
 use hatchery::pack::{PackOptions, pack};
 use hatchery::publish::Published;
 use hatchery::sign::{SigningKey, VerifyingKey};
@@ -156,11 +155,11 @@ impl Fixture {
     }
 
     fn registry(&self) -> GitRegistry {
-        GitRegistry::new(&self.url, &self.cache, Git::new(), None)
+        GitRegistry::new(&self.url, &self.cache, isolated_git(), None)
     }
 
     fn keyed(&self, key: &VerifyingKey) -> GitRegistry {
-        GitRegistry::new(&self.url, &self.cache, Git::new(), Some(*key))
+        GitRegistry::new(&self.url, &self.cache, isolated_git(), Some(*key))
     }
 
     fn tag_commit(&self, tag: &str) -> String {
@@ -230,7 +229,7 @@ fn built_alpha(root: &Path, version: &str) -> Egg {
 }
 
 fn publish(f: &Fixture, egg: &Egg, key: Option<&SigningKey>) -> Published {
-    publish_branch(egg, &f.url, "eggs", None, key, now(), &Git::new()).unwrap()
+    publish_branch(egg, &f.url, "eggs", None, key, now(), &isolated_git()).unwrap()
 }
 
 #[test]
@@ -253,7 +252,7 @@ fn a_repository_without_a_root_manifest_is_refused() {
     let reg = GitRegistry::new(
         work.to_str().unwrap(),
         tmp.path().join("cache"),
-        Git::new(),
+        isolated_git(),
         None,
     );
     let err = block_on(reg.names()).unwrap_err();
@@ -672,7 +671,7 @@ fn publishing_from_parallel_jobs_retries_a_rejected_push() {
         .map(|egg| {
             let url = url.clone();
             std::thread::spawn(move || {
-                publish_branch(&egg, &url, "eggs", None, None, now(), &Git::new()).unwrap()
+                publish_branch(&egg, &url, "eggs", None, None, now(), &isolated_git()).unwrap()
             })
         })
         .collect();
@@ -712,7 +711,7 @@ fn publishes_into_a_folder_of_the_branch() {
         Some("registry"),
         None,
         now(),
-        &Git::new(),
+        &isolated_git(),
     )
     .unwrap();
     let listing = git(&f.remote, &["ls-tree", "-r", "--name-only", "eggs"]);
@@ -735,7 +734,7 @@ impl Folder {
             Some("agents/alpha".into()),
             git_ref.map(str::to_string),
             &self.f.cache,
-            Git::new(),
+            isolated_git(),
         )
     }
 }
@@ -748,7 +747,7 @@ fn a_folder_at_a_tag() {
         Some("agents/alpha".into()),
         Some("v1.1.0".into()),
         &f.cache,
-        Git::new(),
+        isolated_git(),
     );
     assert_eq!(s.label(), f.url);
     assert_eq!(block_on(s.names()).unwrap(), vec![alpha()]);
@@ -844,7 +843,7 @@ fn a_folder_at_a_commit_id() {
         Some("agents/alpha".into()),
         Some(commit.clone()),
         &f.cache,
-        Git::new(),
+        isolated_git(),
     );
     let o = versions(&s, &alpha()).pop().unwrap();
     assert_eq!(o.version.to_string(), "1.0.0");
@@ -860,7 +859,7 @@ fn a_folder_at_a_commit_id() {
         Some("agents/alpha".into()),
         Some("main".into()),
         fresh.path(),
-        Git::new(),
+        isolated_git(),
     );
     let mut pinned = o.clone();
     pinned.git_ref = Some("main".into());
@@ -876,7 +875,7 @@ fn an_unknown_ref_is_an_error_and_a_folder_may_be_the_root() {
         Some("agents/alpha".into()),
         Some("nope".into()),
         &f.cache,
-        Git::new(),
+        isolated_git(),
     );
     assert!(block_on(s.names()).is_err());
 
@@ -896,7 +895,7 @@ fn an_unknown_ref_is_an_error_and_a_folder_may_be_the_root() {
         None,
         None,
         tmp.path().join("cache"),
-        Git::new(),
+        isolated_git(),
     );
     let o = versions(&s, &Name::parse("example/solo").unwrap())
         .pop()
@@ -925,7 +924,7 @@ fn symlinks_in_a_package_are_refused() {
         None,
         None,
         tmp.path().join("cache"),
-        Git::new(),
+        isolated_git(),
     );
     let o = versions(&s, &Name::parse("example/linked").unwrap())
         .pop()
@@ -937,7 +936,7 @@ fn symlinks_in_a_package_are_refused() {
 #[test]
 fn the_git_wrapper_reports_failures_and_lists_remotes() {
     let f = Fixture::new();
-    let g = Git::new();
+    let g = isolated_git();
     let r = g.ls_remote(&f.url).unwrap();
     assert_eq!(r.default_branch.as_deref(), Some("main"));
     assert!(r.tags.contains_key("v1.0.0"));
@@ -966,14 +965,14 @@ fn addresses_and_refs_that_look_like_options_are_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let marker = tmp.path().join("PWNED");
     let evil = format!("--upload-pack=touch {}", marker.display());
-    let g = Git::new();
+    let g = isolated_git();
 
     assert!(g.ls_remote(&evil).is_err());
     assert!(g.cache(&f.cache, &evil).is_err());
     assert!(g.ls_remote("ssh://host/\nrepo").is_err());
-    let reg = GitRegistry::new(&evil, &f.cache, Git::new(), None);
+    let reg = GitRegistry::new(&evil, &f.cache, isolated_git(), None);
     assert!(block_on(reg.names()).is_err());
-    let folder = GitFolder::new(&evil, None, None, &f.cache, Git::new());
+    let folder = GitFolder::new(&evil, None, None, &f.cache, isolated_git());
     assert!(block_on(folder.names()).is_err());
     let egg = built_alpha(tmp.path(), "1.0.0");
     assert!(publish_branch(&egg, &evil, "eggs", None, None, now(), &g).is_err());
@@ -1003,7 +1002,7 @@ fn addresses_and_refs_that_look_like_options_are_refused() {
     drop(cache);
 
     // A ref that is not a tag, branch or commit is an error, not an option.
-    let s = GitFolder::new(&f.url, None, Some("--foo".into()), &f.cache, Git::new());
+    let s = GitFolder::new(&f.url, None, Some("--foo".into()), &f.cache, isolated_git());
     assert!(block_on(s.names()).is_err());
 }
 
@@ -1013,14 +1012,14 @@ fn remote_helpers_and_plain_http_are_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let marker = tmp.path().join("PWNED");
     let ext = format!("ext::sh -c touch% {}", marker.display());
-    let g = Git::new();
+    let g = isolated_git();
 
     assert!(matches!(
         g.ls_remote(&ext).unwrap_err(),
         Error::Invalid { .. }
     ));
     assert!(g.cache(&f.cache, &ext).is_err());
-    let reg = GitRegistry::new(&ext, &f.cache, Git::new(), None);
+    let reg = GitRegistry::new(&ext, &f.cache, isolated_git(), None);
     assert!(block_on(reg.names()).is_err());
     let egg = built_alpha(tmp.path(), "1.0.0");
     assert!(publish_branch(&egg, &ext, "eggs", None, None, now(), &g).is_err());
@@ -1038,10 +1037,10 @@ fn remote_helpers_and_plain_http_are_refused() {
 fn credentials_in_addresses_do_not_reach_eggs_or_messages() {
     let f = Fixture::new();
     let secret = "https://ci:ghp_SECRET@127.0.0.1:1/x.git";
-    let err = Git::new().ls_remote(secret).unwrap_err();
+    let err = isolated_git().ls_remote(secret).unwrap_err();
     assert!(!err.to_string().contains("ghp_SECRET"), "{err}");
     assert!(matches!(err, Error::Git { .. }));
-    let reg = GitRegistry::new(secret, &f.cache, Git::new(), None);
+    let reg = GitRegistry::new(secret, &f.cache, isolated_git(), None);
     let err = block_on(reg.names()).unwrap_err();
     assert!(!format!("{err} {err:?}").contains("ghp_SECRET"), "{err}");
 
@@ -1053,7 +1052,7 @@ fn credentials_in_addresses_do_not_reach_eggs_or_messages() {
         Some("agents/alpha".into()),
         Some("v1.0.0".into()),
         &f.cache,
-        Git::new(),
+        isolated_git(),
     );
     match block_on(s.names()) {
         Ok(_) => {
@@ -1104,7 +1103,7 @@ fn a_folder_says_whether_its_ref_is_a_tag() {
             Some("agents/alpha".into()),
             r.map(str::to_string),
             &f.cache,
-            Git::new(),
+            isolated_git(),
         );
         block_on(s.ref_is_tag()).unwrap()
     };
@@ -1117,7 +1116,7 @@ fn a_folder_says_whether_its_ref_is_a_tag() {
 #[test]
 fn a_lock_file_left_behind_does_not_block_and_stays() {
     let f = Fixture::new();
-    let g = Git::new();
+    let g = isolated_git();
     let held = g.cache(&f.cache, &f.url).unwrap();
     let lock = fs::read_dir(&f.cache)
         .unwrap()
@@ -1162,7 +1161,7 @@ fn commit_attributes(f: &Fixture) -> String {
 fn an_export_is_the_committed_bytes_whatever_the_configuration() {
     let f = Fixture::new();
     let commit = commit_attributes(&f);
-    let cache = Git::new().cache(&f.cache, &f.url).unwrap();
+    let cache = isolated_git().cache(&f.cache, &f.url).unwrap();
     // A partial clone, as with a large repository: git sends the blobs of
     // a shallow fetch anyway, so this fetch is not shallow.
     git(
@@ -1227,10 +1226,48 @@ fn an_export_is_the_committed_bytes_whatever_the_configuration() {
 }
 
 #[test]
+fn an_egg_packed_from_a_tag_does_not_depend_on_the_users_line_endings() {
+    let f = Fixture::new();
+    write(&f.work, ".gitattributes", "* text=auto\n");
+    write(&f.work, "agents/alpha/crow/text.txt", "one\ntwo\n");
+    git_commit(&f.work, "text");
+    git(&f.work, &["tag", "v1.3.0"]);
+    git(&f.work, &["push", "-q", "origin", "main", "v1.3.0"]);
+    let egg_with = |extra: &[(&str, &str)], cache: &Path| {
+        let mut g = isolated_git();
+        for (k, v) in extra {
+            g = g.env(*k, *v);
+        }
+        let s = GitFolder::new(
+            &f.url,
+            Some("agents/alpha".into()),
+            Some("v1.3.0".into()),
+            cache,
+            g,
+        );
+        let o = versions(&s, &alpha()).pop().unwrap();
+        block_on(s.fetch(&o)).unwrap().sha256().to_string()
+    };
+    let other = f.cache.with_file_name("other");
+    let a = egg_with(&[], &f.cache);
+    let b = egg_with(
+        &[
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "core.eol"),
+            ("GIT_CONFIG_VALUE_0", "crlf"),
+            ("GIT_CONFIG_KEY_1", "core.autocrlf"),
+            ("GIT_CONFIG_VALUE_1", "true"),
+        ],
+        &other,
+    );
+    assert_eq!(a, b);
+}
+
+#[test]
 fn symlinks_and_submodules_are_refused_by_an_export() {
     let f = Fixture::new();
     let tmp = tempfile::tempdir().unwrap();
-    let cache = Git::new().cache(&f.cache, &f.url).unwrap();
+    let cache = isolated_git().cache(&f.cache, &f.url).unwrap();
 
     git(
         &f.work,

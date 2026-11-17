@@ -8,6 +8,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use hatchery::Timestamp;
+use hatchery::git::Git;
 use hatchery::time::Clock;
 
 /// Writes a file, creating its folders.
@@ -33,20 +34,40 @@ pub fn clock_at(s: &str) -> Clock {
     Arc::new(move || t)
 }
 
+/// The variables that keep git from reading the user's configuration and
+/// give it a fixed identity and dates.
+pub const GIT_ENV: [(&str, &str); 8] = [
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+    ("GIT_CONFIG_GLOBAL", NO_CONFIG),
+    ("GIT_AUTHOR_NAME", "Test"),
+    ("GIT_AUTHOR_EMAIL", "test@example.org"),
+    ("GIT_COMMITTER_NAME", "Test"),
+    ("GIT_COMMITTER_EMAIL", "test@example.org"),
+    ("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"),
+    ("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z"),
+];
+
+/// An empty configuration file.
+#[cfg(windows)]
+const NO_CONFIG: &str = "NUL";
+/// An empty configuration file.
+#[cfg(not(windows))]
+const NO_CONFIG: &str = "/dev/null";
+
+/// The library's [`Git`] for tests: it runs with [`GIT_ENV`], so nothing in
+/// the developer's git configuration changes a result. Give it to every
+/// client and registry a test builds.
+pub fn isolated_git() -> Git {
+    GIT_ENV.iter().fold(Git::new(), |g, (k, v)| g.env(*k, *v))
+}
+
 /// Runs git with a fixed identity, dates and no user or system config, and
 /// returns its trimmed standard output.
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.org")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.org")
-        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
-        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+        .envs(GIT_ENV)
         .output()
         .expect("git runs");
     assert!(

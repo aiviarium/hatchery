@@ -72,6 +72,7 @@ fn client_for(reg: &Path, cache: &Path, target: StaticTarget, extra: &str) -> Cl
     ))
     .unwrap();
     Client::builder()
+        .git(common::isolated_git())
         .config(config)
         .target(target)
         .clock(clock())
@@ -235,6 +236,7 @@ fn a_folder_can_be_installed_again_from_the_lock() {
         &[("crow/plugin.json", "{}")],
     );
     let client = Client::builder()
+        .git(common::isolated_git())
         .target(crow())
         .clock(clock())
         .cache_dir(env.root.join("cache"))
@@ -298,7 +300,11 @@ fn a_client_without_targets_cannot_add() {
         env.reg().display()
     ))
     .unwrap();
-    let client = Client::builder().config(config).build().unwrap();
+    let client = Client::builder()
+        .git(common::isolated_git())
+        .config(config)
+        .build()
+        .unwrap();
     let err = block_on(client.add(&spec("demo/a"), &env.dir("p"))).unwrap_err();
     assert!(matches!(err, Error::Invalid { .. }), "{err}");
 }
@@ -516,6 +522,7 @@ fn a_fat_egg_file_installs_with_no_registry() {
     fs::write(&file, egg.bytes()).unwrap();
 
     let client = Client::builder()
+        .git(common::isolated_git())
         .target(
             StaticTarget::new("rookery")
                 .variants(Variants::Matching(Platform::new("linux", "x86_64"))),
@@ -549,6 +556,7 @@ fn a_fat_egg_file_installs_with_no_registry() {
 
     // On demand, the other architecture comes from inside the file.
     let od = Client::builder()
+        .git(common::isolated_git())
         .target(StaticTarget::new("rookery").variants(Variants::OnDemand))
         .cache_dir(env.root.join("cache"))
         .build()
@@ -572,6 +580,7 @@ fn a_folder_installs_and_is_left_by_update() {
     );
     let out = env.dir("p");
     let client = Client::builder()
+        .git(common::isolated_git())
         .target(crow())
         .clock(clock())
         .cache_dir(env.root.join("cache"))
@@ -720,6 +729,7 @@ fn a_git_registry_pins_commits_and_refuses_a_moved_tag() {
     .unwrap();
     let build = || {
         Client::builder()
+            .git(common::isolated_git())
             .config(config.clone())
             .target(crow())
             .clock(clock())
@@ -773,6 +783,7 @@ fn credentials_in_git_addresses_stay_out_of_the_lock() {
     let config = Config::parse(&format!("registries {{\n  git \"{url}\"\n}}\n")).unwrap();
     let build = || {
         Client::builder()
+            .git(common::isolated_git())
             .config(config.clone())
             .target(crow())
             .clock(clock())
@@ -793,6 +804,7 @@ fn credentials_in_git_addresses_stay_out_of_the_lock() {
     // A single git folder at a tag: the tag moving is refused on update.
     let dir2 = env.dir("p2");
     let client = Client::builder()
+        .git(common::isolated_git())
         .target(crow())
         .clock(clock())
         .cache_dir(env.root.join("cache"))
@@ -832,6 +844,7 @@ fn a_lock_entry_from_a_registry_that_no_longer_serves_its_group_is_refused() {
     ))
     .unwrap();
     let client = Client::builder()
+        .git(common::isolated_git())
         .config(config)
         .target(crow())
         .clock(clock())

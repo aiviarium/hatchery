@@ -27,12 +27,15 @@ const ALLOWED_SCHEMES: [&str; 4] = ["https", "ssh", "git", "file"];
 pub struct Git {
     /// The program to run, a path or a name found on `PATH`. `git` by default.
     pub program: PathBuf,
+    /// Variables set for every command, after the ones Hatchery sets itself.
+    env: Vec<(String, String)>,
 }
 
 impl Default for Git {
     fn default() -> Self {
         Git {
             program: PathBuf::from("git"),
+            env: Vec::new(),
         }
     }
 }
@@ -62,6 +65,17 @@ impl Git {
     /// The same as [`Git::default`]. It runs `git` from `PATH`.
     pub fn new() -> Git {
         Git::default()
+    }
+
+    /// Sets an environment variable for every command this value runs, such
+    /// as `GIT_CONFIG_GLOBAL` to keep git from reading the user's
+    /// configuration. A later call for the same name replaces the value.
+    #[must_use]
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Git {
+        let key = key.into();
+        self.env.retain(|(k, _)| *k != key);
+        self.env.push((key, value.into()));
+        self
     }
 
     /// Runs git in a folder (or where the process is when None) and returns
@@ -107,6 +121,9 @@ impl Git {
         // A password prompt of ssh would hang a server.
         if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
             cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+        }
+        for (k, v) in &self.env {
+            cmd.env(k, v);
         }
         for (k, v) in env {
             cmd.env(k, v);
@@ -1019,6 +1036,21 @@ mod tests {
         let err = check_url("http://user:secret@example.org/x.git").unwrap_err();
         assert!(!err.to_string().contains("secret"), "{err}");
         assert!(err.to_string().contains("example.org"), "{err}");
+    }
+
+    #[test]
+    fn env_is_given_to_git_and_the_last_value_wins() {
+        let g = Git::new()
+            .env("GIT_CONFIG_COUNT", "0")
+            .env("X", "1")
+            .env("X", "2");
+        assert_eq!(g.env.iter().filter(|(k, _)| k == "X").count(), 1);
+        let c = g.command(None, &[], &["--version"], &[]);
+        let envs: Vec<_> = c.get_envs().collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| *k == "X" && *v == Some("2".as_ref()))
+        );
     }
 
     #[test]
