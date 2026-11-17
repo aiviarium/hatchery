@@ -7,7 +7,7 @@ default min-age="3d"
 
 registries {
   git "https://github.com/aiviarium/parrot.git" only="aiviarium" min-age="0d"
-  http "https://eggs.example.org" key="ed25519:9a3f…" min-age="7d" token-env="EGGS_EXAMPLE_TOKEN"
+  http "https://eggs.example.org" key="ed25519:edaea96ff0df28e04262ffeb14297bf3131d1daee5938d0ec2d47a9c6af363cd" min-age="7d" token-env="EGGS_EXAMPLE_TOKEN"
   dir "/srv/eggs"
 }
 ```

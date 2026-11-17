@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use kdl::{KdlDocument, KdlEntry, KdlNode};
+use kdl::{KdlDocument, KdlDocumentFormat, KdlEntry, KdlNode};
 
 use crate::error::{Error, IoContext, Result};
 use crate::kdlx;
@@ -118,7 +118,22 @@ pub fn is_local_location(loc: &str) -> bool {
     }
 }
 
+/// Reads one registry line. An error names the line, such as
+/// `registry http "https://example.org": key: …`.
 fn parse_registry(n: &KdlNode, what: &str) -> Result<RegistryConfig> {
+    parse_registry_line(n, what).map_err(|e| match e {
+        Error::Invalid { message, .. } => {
+            let place = match kdlx::args(n).next().and_then(kdlx::text) {
+                Some(loc) => format!("{} {loc:?}", kdlx::name(n)),
+                None => kdlx::name(n).to_string(),
+            };
+            Error::invalid(what, format!("registry {place}: {message}"))
+        }
+        e => e,
+    })
+}
+
+fn parse_registry_line(n: &KdlNode, what: &str) -> Result<RegistryConfig> {
     let mut r = RegistryConfig::new(kdlx::name(n), kdlx::one_string(n, what)?);
     for (k, v) in kdlx::props(n) {
         let v =
@@ -133,7 +148,7 @@ fn parse_registry(n: &KdlNode, what: &str) -> Result<RegistryConfig> {
                     .collect();
             }
             "key" => {
-                crate::sign::parse_verifying_key(&v)?;
+                crate::sign::parse_verifying_key(&v).map_err(key_error)?;
                 r.key = Some(v);
             }
             "min-age" => r.min_age = Some(parse_duration(&v)?),
@@ -217,61 +232,50 @@ impl Config {
     }
 
     /// Adds a registry at the end of the search order, or replaces the line
-    /// with the same location.
+    /// with the same location. A new line gets the indentation of its
+    /// siblings, or two spaces when there are none.
     pub fn add_registry(&mut self, r: RegistryConfig) {
-        let node = r.to_node();
-        let regs = match self
+        let mut node = r.to_node();
+        node.autoformat();
+        let at = self
             .doc
             .nodes()
             .iter()
-            .position(|n| kdlx::name(n) == "registries")
-        {
-            Some(i) => &mut self.doc.nodes_mut()[i],
-            None => {
-                self.doc.nodes_mut().push(KdlNode::new("registries"));
-                let last = self.doc.nodes_mut().last_mut().expect("just pushed");
-                last.autoformat();
-                last
+            .position(|n| kdlx::name(n) == "registries");
+        let at = at.unwrap_or_else(|| {
+            let top = self.doc.nodes_mut();
+            let mut regs = KdlNode::new("registries");
+            regs.autoformat();
+            if let Some(last) = top.last_mut() {
+                // A blank line between the old last node and the new one.
+                if let Some(f) = last.format_mut()
+                    && f.terminator.is_empty()
+                {
+                    f.terminator = "\n".to_string();
+                }
+                if let Some(f) = regs.format_mut() {
+                    f.leading = "\n".to_string();
+                }
             }
-        };
-        let had_children = regs.children().is_some_and(|c| !c.nodes().is_empty());
-        let children = regs.ensure_children();
+            top.push(regs);
+            top.len() - 1
+        });
+        let children = self.doc.nodes_mut()[at].ensure_children();
         let existing = children.nodes().iter().position(|n| {
             kdlx::args(n).next().and_then(kdlx::text).as_deref() == Some(r.location.as_str())
         });
         match existing {
             Some(i) => {
                 let old = children.nodes()[i].format().cloned();
-                let mut node = node;
-                node.autoformat();
                 if let (Some(f), Some(nf)) = (old, node.format_mut()) {
                     nf.leading = f.leading;
                     nf.trailing = f.trailing;
+                    nf.terminator = f.terminator;
+                    nf.before_terminator = f.before_terminator;
                 }
                 children.nodes_mut()[i] = node;
             }
-            None => {
-                let mut node = node;
-                node.autoformat();
-                // Indent like the lines already there.
-                let leading = children
-                    .nodes()
-                    .last()
-                    .and_then(|n| n.format().map(|f| f.leading.clone()))
-                    .map(|l| l.rsplit('\n').next().unwrap_or("").to_string())
-                    .unwrap_or_else(|| "    ".to_string());
-                if let Some(f) = node.format_mut() {
-                    f.leading = leading;
-                    f.trailing = "\n".to_string();
-                }
-                if !had_children && let Some(f) = children.format_mut() {
-                    f.leading = "\n".to_string();
-                }
-                children.nodes_mut().push(node);
-                if !had_children && children.format().is_none() {
-                    children.autoformat();
-                }
-            }
+            None => push_line(children, node),
         }
         self.registries.retain(|o| o.location != r.location);
         // Keep the order of the file.
@@ -300,9 +304,11 @@ impl Config {
             if kdlx::name(n) == "registries"
                 && let Some(c) = n.children_mut()
             {
-                c.nodes_mut().retain(|r| {
-                    kdlx::args(r).next().and_then(kdlx::text).as_deref() != Some(location)
-                });
+                while let Some(i) = c.nodes().iter().position(|r| {
+                    kdlx::args(r).next().and_then(kdlx::text).as_deref() == Some(location)
+                }) {
+                    drop_line(c, i);
+                }
             }
         }
         self.registries.len() != before
@@ -316,6 +322,115 @@ impl Config {
     /// Writes the file to `path`, replacing it in one step. Fails with [`Error::Io`] when it cannot be written.
     pub fn save(&self, path: &Path) -> Result<()> {
         crate::fsx::write_atomic(path, self.to_kdl().as_bytes())
+    }
+}
+
+/// Puts `key: ` before the reason a public key is refused.
+fn key_error(e: Error) -> Error {
+    match e {
+        Error::Invalid { message, .. } => Error::invalid("key", format!("key: {message}")),
+        e => e,
+    }
+}
+
+/// The text before the last newline of a node's leading space, newline
+/// included. It holds the comments and blank lines above the node.
+fn above(leading: &str) -> &str {
+    leading.rfind('\n').map_or("", |i| &leading[..=i])
+}
+
+/// Appends a line to a block, written like the lines already there.
+fn push_line(children: &mut KdlDocument, mut node: KdlNode) {
+    let leading_of = |n: &KdlNode| n.format().map(|f| f.leading.clone()).unwrap_or_default();
+    let multiline = match children.nodes().last() {
+        Some(_) => children
+            .nodes()
+            .iter()
+            .any(|n| leading_of(n).contains('\n')),
+        None => children.format().is_some_and(|f| f.leading.contains('\n')),
+    };
+    if !multiline && !children.nodes().is_empty() {
+        // `registries { dir "/a" }`: stay on the line.
+        if let Some(f) = children
+            .nodes_mut()
+            .last_mut()
+            .and_then(KdlNode::format_mut)
+        {
+            f.terminator = ";".to_string();
+            f.before_terminator = String::new();
+        }
+        if let Some(f) = node.format_mut() {
+            f.leading = " ".to_string();
+            f.terminator = String::new();
+            f.before_terminator = " ".to_string();
+        }
+        children.nodes_mut().push(node);
+        return;
+    }
+    let indent = match children.nodes().last() {
+        Some(n) => {
+            let l = leading_of(n);
+            l.rsplit('\n').next().unwrap_or("").to_string()
+        }
+        None => "  ".to_string(),
+    };
+    if let Some(last) = children
+        .nodes_mut()
+        .last_mut()
+        .and_then(KdlNode::format_mut)
+        && !last.terminator.contains('\n')
+    {
+        last.terminator = "\n".to_string();
+    }
+    if let Some(f) = node.format_mut() {
+        f.leading = indent;
+        f.terminator = "\n".to_string();
+    }
+    if children.nodes().is_empty() {
+        if children.format().is_none() {
+            children.set_format(KdlDocumentFormat::default());
+        }
+        if let Some(f) = children.format_mut()
+            && !f.leading.contains('\n')
+        {
+            f.leading = "\n".to_string();
+        }
+    }
+    children.nodes_mut().push(node);
+}
+
+/// Removes line `i` of a block. The comments above it stay, and no blank
+/// line is left.
+fn drop_line(children: &mut KdlDocument, i: usize) {
+    let gone = children.nodes_mut().remove(i);
+    let leading = gone.format().map(|f| f.leading.clone()).unwrap_or_default();
+    let carry = above(&leading).to_string();
+    // Blank lines go. The newline after `{` stays when the first line goes.
+    let blank = carry.trim().is_empty();
+    match children.nodes_mut().get_mut(i) {
+        Some(next) => {
+            if let Some(f) = next.format_mut() {
+                let keep = if blank && (i > 0 || f.leading.contains('\n')) {
+                    ""
+                } else {
+                    &carry
+                };
+                f.leading = format!("{keep}{}", f.leading);
+            }
+        }
+        None if i == 0 => {
+            if let Some(f) = children.format_mut() {
+                f.leading = format!("{}{carry}", f.leading);
+                if blank && !f.leading.contains('\n') && leading.contains('\n') {
+                    f.leading = "\n".to_string();
+                }
+            }
+        }
+        None => {
+            if !blank && let Some(f) = children.format_mut() {
+                f.trailing = format!("{carry}{}", f.trailing);
+            }
+        }
     }
 }
 
@@ -403,6 +518,68 @@ registries {
         assert_eq!(
             again.registries[0].min_age,
             Some(Duration::from_secs(86_400))
+        );
+    }
+
+    #[test]
+    fn a_bad_key_names_its_registry_line() {
+        let text = "registries {\n  dir \"/srv/eggs\"\n  http \"https://eggs.example.org\" key=\"ed25519:9a3f\u{2026}\"\n}\n";
+        let e = Config::parse(text).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "hatchery.kdl: registry http \"https://eggs.example.org\": key: must be ed25519: and 64 hex digits"
+        );
+    }
+
+    #[test]
+    fn added_lines_take_the_indent_of_their_siblings() {
+        let add = |text: &str| {
+            let mut c = Config::parse(text).unwrap();
+            c.add_registry(RegistryConfig::new("dir", "/new"));
+            c.to_kdl()
+        };
+        assert_eq!(
+            add("registries {\n  // c\n  dir \"/a\"\n}\n\n// end\n"),
+            "registries {\n  // c\n  dir \"/a\"\n  dir \"/new\"\n}\n\n// end\n"
+        );
+        assert_eq!(
+            add("registries {\n\tdir \"/a\"\n}\n"),
+            "registries {\n\tdir \"/a\"\n\tdir \"/new\"\n}\n"
+        );
+        assert_eq!(
+            add("registries {\n}\n"),
+            "registries {\n  dir \"/new\"\n}\n"
+        );
+        assert_eq!(
+            add("default min-age=\"3d\"\n"),
+            "default min-age=\"3d\"\n\nregistries {\n  dir \"/new\"\n}\n"
+        );
+        assert_eq!(add(""), "registries {\n  dir \"/new\"\n}\n");
+    }
+
+    #[test]
+    fn removed_lines_leave_no_blank_line() {
+        let remove = |text: &str, loc: &str| {
+            let mut c = Config::parse(text).unwrap();
+            assert!(c.remove_registry(loc));
+            c.to_kdl()
+        };
+        let text = "// top\nregistries {\n  dir \"/a\"\n  dir \"/b\"\n  dir \"/c\"\n}\n";
+        assert_eq!(
+            remove(text, "/a"),
+            "// top\nregistries {\n  dir \"/b\"\n  dir \"/c\"\n}\n"
+        );
+        assert_eq!(
+            remove(text, "/b"),
+            "// top\nregistries {\n  dir \"/a\"\n  dir \"/c\"\n}\n"
+        );
+        assert_eq!(
+            remove(text, "/c"),
+            "// top\nregistries {\n  dir \"/a\"\n  dir \"/b\"\n}\n"
+        );
+        assert_eq!(
+            remove("registries {\n  dir \"/a\"\n}\n", "/a"),
+            "registries {\n}\n"
         );
     }
 

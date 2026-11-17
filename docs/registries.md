@@ -142,7 +142,7 @@ The signing key never goes on a command line. Hatchery reads it from the variabl
 To check an egg against a registry by hand:
 
 ```bash
-hatchery verify dist/claude-1.4.0.egg --registry ./registry --key ed25519:9a3f…
+hatchery verify dist/claude-1.4.0.egg --registry ./registry --key ed25519:edaea96ff0df28e04262ffeb14297bf3131d1daee5938d0ec2d47a9c6af363cd
 ```
 
 ## Withdrawing a version
