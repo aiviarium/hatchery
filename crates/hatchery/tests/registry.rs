@@ -949,3 +949,38 @@ fn offers_keep_the_index_order_data() {
         .collect();
     assert_eq!(by_key.len(), 2);
 }
+
+#[test]
+fn a_token_is_not_sent_in_the_clear_and_a_missing_one_is_an_error() {
+    let fetch = || FolderFetch {
+        prefix: "https://eggs.example.org/".into(),
+        root: PathBuf::new(),
+        token: None,
+        seen: Mutex::new(Vec::new()),
+    };
+    let build = |line: &str| {
+        let config = hatchery::Config::parse(&format!("registries {{\n  {line}\n}}\n")).unwrap();
+        hatchery::Client::builder()
+            .config(config)
+            .fetch(fetch())
+            .build()
+            .err()
+            .map(|e| e.to_string())
+    };
+    let err = build(r#"http "http://eggs.example.org" token-env="PATH""#).unwrap();
+    assert!(err.contains("plain http"), "{err}");
+    assert!(err.contains("http://eggs.example.org"), "{err}");
+    // On this machine, plain http stays local.
+    assert_eq!(
+        build(r#"http "http://127.0.0.1:8080" token-env="PATH""#),
+        None
+    );
+    let err =
+        build(r#"http "https://eggs.example.org" token-env="HATCHERY_TEST_NO_SUCH_VARIABLE""#)
+            .unwrap();
+    assert!(err.contains("HATCHERY_TEST_NO_SUCH_VARIABLE"), "{err}");
+    assert_eq!(
+        build(r#"http "https://eggs.example.org" token-env="PATH""#),
+        None
+    );
+}

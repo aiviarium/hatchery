@@ -55,6 +55,16 @@ pub struct ClientBuilder {
     kinds: BTreeMap<String, SourceFactory>,
 }
 
+/// Whether an address names this machine, where plain http stays local.
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 /// `$XDG_CACHE_HOME/hatchery`, else `~/.cache/hatchery`; on Windows
 /// `%LOCALAPPDATA%\hatchery`.
 fn default_cache_dir() -> PathBuf {
@@ -165,7 +175,23 @@ impl ClientBuilder {
                     })?;
                     let url = Url::parse(&cfg.location)
                         .map_err(|e| Error::invalid(&line, format!("not an address: {e}")))?;
-                    let token = cfg.token_env.as_deref().and_then(Token::from_env);
+                    let token = match cfg.token_env.as_deref() {
+                        None => None,
+                        Some(var) => {
+                            if url.scheme() == "http" && !is_loopback(&url) {
+                                return Err(Error::invalid(
+                                    &line,
+                                    "token-env would send the token over plain http, where anyone on the way can read it; use https://",
+                                ));
+                            }
+                            Some(Token::from_env(var).ok_or_else(|| {
+                                Error::invalid(
+                                    &line,
+                                    format!("token-env names {var}, which is not set or is empty"),
+                                )
+                            })?)
+                        }
+                    };
                     Arc::new(StaticRegistry::http(url, fetch, token, key))
                 }
                 "dir" => Arc::new(StaticRegistry::dir(&cfg.location, key)),

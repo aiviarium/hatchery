@@ -41,7 +41,7 @@ A tool can add a kind with `ClientBuilder::kind`, backed by its own `Source`.
 | `key="ed25519:…"` | The registry's public key. Eggs from it must be signed. For a `git` registry, a version that has only a tag is not installed |
 | `unsigned-tags=#true` | For a `git` registry with a `key`: install versions that have only a tag from source, unsigned. Anyone who can push a tag can then release. Off by default |
 | `min-age="3d"` | The minimum release age for this registry |
-| `token-env="VAR"` | The environment variable with a bearer token for it |
+| `token-env="VAR"` | The environment variable with a bearer token for it. It must be set. Hatchery sends the token over `https://`, and over plain `http://` only to this machine |
 
 Other properties are kept and given to a tool's own `kind`.
 
