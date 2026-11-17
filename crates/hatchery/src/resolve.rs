@@ -59,17 +59,26 @@ pub struct SourceEntry {
     pub only: Vec<String>,
     /// How long a new version is held. Zero holds nothing.
     pub min_age: Duration,
+    /// Whether the registry has a key, so that the publish times of its
+    /// versions are signed. Without one, a publish time is not trusted.
+    pub signed: bool,
 }
 
 impl SourceEntry {
     /// A registry that is searched in order and subject to the minimum
     /// release age.
-    pub fn registry(source: Arc<dyn Source>, only: Vec<String>, min_age: Duration) -> Self {
+    pub fn registry(
+        source: Arc<dyn Source>,
+        only: Vec<String>,
+        min_age: Duration,
+        signed: bool,
+    ) -> Self {
         SourceEntry {
             source,
             origin: Origin::Registry,
             only,
             min_age,
+            signed,
         }
     }
 
@@ -80,6 +89,7 @@ impl SourceEntry {
             origin,
             only: Vec::new(),
             min_age: Duration::ZERO,
+            signed: false,
         }
     }
 
@@ -373,11 +383,14 @@ impl Resolver {
         if !e.is_registry() {
             return None;
         }
+        // Anyone who can write an unsigned index can backdate a version,
+        // so only a signed publish time counts.
+        let published = if e.signed { offer.published } else { None };
         self.state().seen.held_until(
             e.source.label(),
             &offer.name,
             &offer.version,
-            offer.published,
+            published,
             e.min_age,
             self.now,
         )
@@ -984,6 +997,7 @@ mod tests {
                 fake,
                 vec![],
                 Duration::from_secs(min_age),
+                true,
             )],
             vec![crow()],
             Timestamp::parse("2026-11-17T00:00:00Z").unwrap(),
@@ -1171,7 +1185,7 @@ mod tests {
             Arc::new(StaticTarget::new("rookery").fact("rookery", "0.6.0")),
         ];
         let r = Resolver::new(
-            vec![SourceEntry::registry(fake, vec![], Duration::ZERO)],
+            vec![SourceEntry::registry(fake, vec![], Duration::ZERO, true)],
             targets,
             Timestamp::from_secs(0),
             Seen::default(),
@@ -1204,7 +1218,7 @@ mod tests {
         ));
         let mk = |platform: Platform, f: Arc<Fake>| {
             Resolver::new(
-                vec![SourceEntry::registry(f, vec![], Duration::ZERO)],
+                vec![SourceEntry::registry(f, vec![], Duration::ZERO, true)],
                 vec![Arc::new(
                     StaticTarget::new("crow").variants(Variants::Matching(platform)),
                 )],
@@ -1243,7 +1257,12 @@ mod tests {
         ));
         assert!(solve(&mk(Platform::new("linux", "riscv64"), fb), &[("g/a", "*")]).is_ok());
         let on_demand = Resolver::new(
-            vec![SourceEntry::registry(linux_arm, vec![], Duration::ZERO)],
+            vec![SourceEntry::registry(
+                linux_arm,
+                vec![],
+                Duration::ZERO,
+                true,
+            )],
             vec![Arc::new(
                 StaticTarget::new("crow").variants(Variants::OnDemand),
             )],
@@ -1353,6 +1372,37 @@ mod tests {
     }
 
     #[test]
+    fn an_unsigned_publish_time_does_not_shorten_the_hold() {
+        let backdated = || {
+            vec![published(
+                offer("g/a", "1.0.0", vec![info("crow")]),
+                "2020-01-01T00:00:00Z",
+            )]
+        };
+        let unsigned = Resolver::new(
+            vec![SourceEntry::registry(
+                Arc::new(Fake::new("fake", backdated())),
+                vec![],
+                Duration::from_secs(3 * DAY),
+                false,
+            )],
+            vec![crow()],
+            Timestamp::parse("2026-11-17T00:00:00Z").unwrap(),
+            Seen::default(),
+        );
+        // Counted from when this installation first saw it: now.
+        match solve(&unsigned, &[("g/a", "*")]).unwrap_err() {
+            Error::TooYoung { until, .. } => {
+                assert_eq!(until, Timestamp::parse("2026-11-20T00:00:00Z").unwrap());
+            }
+            e => panic!("{e}"),
+        }
+        // A registry with a key signs the time, which counts.
+        let signed = resolver_with(backdated(), 3 * DAY);
+        assert!(solve(&signed, &[("g/a", "*")]).is_ok());
+    }
+
+    #[test]
     fn the_installed_version_is_never_held() {
         // An update looks the installed package up again; a young newer
         // version must leave it where it is rather than fail.
@@ -1419,6 +1469,7 @@ mod tests {
                 fake,
                 vec![],
                 Duration::from_secs(3 * DAY),
+                true,
             )],
             vec![crow()],
             Timestamp::parse("2026-11-17T00:00:00Z").unwrap(),
@@ -1443,6 +1494,7 @@ mod tests {
                     fake,
                     vec![],
                     Duration::from_secs(3 * DAY),
+                    true,
                 )],
                 vec![crow()],
                 now,
@@ -1625,7 +1677,12 @@ mod tests {
         fake.lazy = true;
         let fake = Arc::new(fake);
         let r = Resolver::new(
-            vec![SourceEntry::registry(fake.clone(), vec![], Duration::ZERO)],
+            vec![SourceEntry::registry(
+                fake.clone(),
+                vec![],
+                Duration::ZERO,
+                true,
+            )],
             vec![crow()],
             Timestamp::from_secs(0),
             Seen::default(),
@@ -1676,8 +1733,8 @@ mod tests {
         ));
         let r = Resolver::new(
             vec![
-                SourceEntry::registry(first, vec!["mine".into()], Duration::ZERO),
-                SourceEntry::registry(second, vec!["other".into()], Duration::ZERO),
+                SourceEntry::registry(first, vec!["mine".into()], Duration::ZERO, true),
+                SourceEntry::registry(second, vec!["other".into()], Duration::ZERO, true),
             ],
             vec![crow()],
             Timestamp::from_secs(0),

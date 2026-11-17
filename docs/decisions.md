@@ -89,6 +89,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - A version whose newest candidates are skipped falls back to an older one. When nothing is left, the error is the reason of the newest version in range: `Withdrawn`, `Unmet`, `NoVariant`, `NotBuilt` or `TooYoung`.
 - Versions from git tags have no signed publish time, so they count from when this installation first saw them. So a new installation with a hold doesn't install a version that only has a tag until the hold has passed. Give your own repository `min-age="0d"`, or use `--allow-young`.
 - The backdating guard counts per registry and package. Versions in the first listing of a package count from their signed time. A version that appears later counts from the later of its signed time and when it was first seen.
+- A registry without a `key` has no signed time. Its `published` times are ignored, and every version counts from when it was first seen, in the first listing too.
 - A registry given as a local path or a `file://` URL is local, and is not held by default.
 - An installed package keeps the version it has when `add` names that version again. It is not fetched a second time.
 - Updating a package replaces its folder, so variants that were fetched on demand are fetched again when needed.

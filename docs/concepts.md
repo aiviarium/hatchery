@@ -101,6 +101,8 @@ A new version is not installed until it has been public for a set time. Most mal
 
 - The setting is per registry, with a `default` line for the rest. Without either, a registry read over the network is held for 3 days. A local folder is not held.
 - For built eggs, `hatchery publish` writes `published` into the index, and the signature covers it.
+- Only a registry with a `key` has its publish times trusted. Without a key, anyone who can write the index can backdate a version. The age then counts from when this installation first saw the version.
+- With a key, the versions of the first listing in a new install folder count from their signed `published` time. That rests on the publisher's clock: a publisher whose key signs an old time skips the hold in a fresh folder.
 - A tag's date is set by its author. For tags, the age counts from when this installation first saw the tag.
 - Hatchery remembers which versions it has seen in each registry. A version that shows up later with an old publish time counts from when it was first seen.
 - The resolver skips versions that are too young, for the package you asked for and for every dependency. If an older version fits the range, it installs that one. If none does, it fails with `TooYoung` and the time the version becomes installable.

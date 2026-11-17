@@ -544,7 +544,14 @@ impl Client {
         let sources = self
             .registries
             .iter()
-            .map(|r| SourceEntry::registry(r.source.clone(), r.config.only.clone(), r.min_age))
+            .map(|r| {
+                SourceEntry::registry(
+                    r.source.clone(),
+                    r.config.only.clone(),
+                    r.min_age,
+                    r.config.key.is_some(),
+                )
+            })
             .collect();
         let mut r = Resolver::new(sources, self.targets.clone(), self.now(), seen);
         r.set_installed(
