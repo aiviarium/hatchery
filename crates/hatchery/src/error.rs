@@ -85,7 +85,7 @@ pub enum Error {
     },
 
     /// A line of a target's `requires` block does not hold.
-    #[error("{at}: target {target} requires {fact} {wanted}, {found}", wanted = wanted.join(" "), found = match found { Some(f) => format!("but it is {f}"), None => "which is not present".to_string() })]
+    #[error("{at}: target {target} requires {fact}{wanted}, {found}", wanted = wanted.iter().map(|w| format!(" {w}")).collect::<String>(), found = match found { Some(f) => format!("but it is {f}"), None => "which is not present".to_string() })]
     Unmet {
         /// The package, version and registry.
         at: At,
@@ -293,5 +293,27 @@ impl<T> IoContext<T> for std::io::Result<T> {
             path: path.into(),
             source,
         })
+    }
+}
+
+#[cfg(test)]
+mod unmet_tests {
+    use super::*;
+
+    fn unmet(wanted: &[&str], found: Option<&str>) -> String {
+        Error::Unmet {
+            at: At::new("example/demo"),
+            target: "crow".into(),
+            fact: "gpu".into(),
+            wanted: wanted.iter().map(|w| w.to_string()).collect(),
+            found: found.map(String::from),
+        }
+        .to_string()
+    }
+
+    #[test]
+    fn unmet_has_no_stray_space_when_nothing_is_wanted() {
+        assert!(unmet(&[], None).ends_with("requires gpu, which is not present"));
+        assert!(unmet(&["1", "2"], Some("3")).ends_with("requires gpu 1 2, but it is 3"));
     }
 }

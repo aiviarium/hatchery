@@ -165,6 +165,31 @@ pub(crate) fn at_of(offer: &Offer) -> At {
         .registry(&offer.registry)
 }
 
+/// The message for a package that has none of the client's targets. A client
+/// has no target names when it only lists what registries offer.
+fn no_target(names: &[&str]) -> String {
+    match names {
+        [] => "has no target this client installs".to_string(),
+        [one] => format!("has no target {one}"),
+        _ => format!("has none of the targets {}", names.join(", ")),
+    }
+}
+
+#[cfg(test)]
+mod no_target_tests {
+    use super::no_target;
+
+    #[test]
+    fn the_message_reads_well_for_any_number_of_targets() {
+        assert_eq!(no_target(&[]), "has no target this client installs");
+        assert_eq!(no_target(&["crow"]), "has no target crow");
+        assert_eq!(
+            no_target(&["crow", "rookery"]),
+            "has none of the targets crow, rookery"
+        );
+    }
+}
+
 fn conflict(name: &Name, version: &Version, message: String) -> Error {
     Error::Conflict {
         at: At::new(name).version(version),
@@ -379,11 +404,8 @@ impl Resolver {
             .filter_map(|t| details.target(t.name()).map(|i| (t, i)))
             .collect();
         if mine.is_empty() {
-            let wanted: Vec<&str> = self.targets.iter().map(|t| t.name()).collect();
-            return Err(Error::invalid(
-                &at,
-                format!("has no target for {}", wanted.join(", ")),
-            ));
+            let names: Vec<&str> = self.targets.iter().map(|t| t.name()).collect();
+            return Err(Error::invalid(&at, no_target(&names)));
         }
         for (t, info) in &mine {
             if let Some((req, found)) = target::unmet(t.as_ref(), &info.requires) {
@@ -1054,7 +1076,7 @@ mod tests {
         );
         let r = resolver_with(vec![offer("g/a", "1.1.0", vec![info("rookery")])], 0);
         let err = solve(&r, &[("g/a", "*")]).unwrap_err();
-        assert!(err.to_string().contains("no target for crow"), "{err}");
+        assert!(err.to_string().contains("has no target crow"), "{err}");
     }
 
     #[test]
