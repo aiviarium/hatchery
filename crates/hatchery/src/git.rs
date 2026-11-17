@@ -1,5 +1,5 @@
-//! The `git` command, and the per-repository cache of shallow, sparse
-//! checkouts.
+//! The `git` command, and the per-repository cache of shallow, partial
+//! clones.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -72,19 +72,18 @@ impl Git {
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
 
-    /// `config` goes before the subcommand as `-c` options.
-    pub(crate) fn exec(
+    /// A git command ready to run. `config` goes before the subcommand as
+    /// `-c` options.
+    fn command(
         &self,
         dir: Option<&Path>,
         config: &[&str],
         args: &[&str],
         env: &[(&str, &str)],
-    ) -> Result<Vec<u8>> {
+    ) -> Command {
         let mut cmd = Command::new(&self.program);
         // Local repositories are remotes in tests and in some set-ups.
         cmd.args(["-c", "protocol.file.allow=always"]);
-        // Files must come out as they went in, for the egg to be the same.
-        cmd.args(["-c", "core.autocrlf=false"]);
         cmd.args(["-c", "advice.detachedHead=false"]);
         for c in config {
             cmd.args(["-c", c]);
@@ -101,7 +100,23 @@ impl Git {
         for (k, v) in env {
             cmd.env(k, v);
         }
-        cmd.stdin(Stdio::null());
+        cmd
+    }
+
+    pub(crate) fn exec(
+        &self,
+        dir: Option<&Path>,
+        config: &[&str],
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<Vec<u8>> {
+        self.finish(
+            self.command(dir, config, args, env).stdin(Stdio::null()),
+            args,
+        )
+    }
+
+    fn finish(&self, cmd: &mut Command, args: &[&str]) -> Result<Vec<u8>> {
         let shown = redact_text(&args.join(" "));
         let out = cmd.output().map_err(|e| Error::Git {
             args: shown.clone(),
@@ -318,7 +333,7 @@ impl Drop for Scratch {
     }
 }
 
-/// The cache folder of one repository: a shallow, sparse, partial clone that
+/// The cache folder of one repository: a shallow, partial clone that
 /// is reused for every package of the repository. Holds the folder's lock.
 #[derive(Debug)]
 pub struct RepoCache {
@@ -414,14 +429,20 @@ impl RepoCache {
 
     /// Whether the commit is in the cache already.
     pub fn has_commit(&self, commit: &str) -> bool {
+        // `rev-list --missing=print` never fetches. `cat-file` would fetch a
+        // commit the cache lacks, with its whole history, just to answer, and
+        // only git 2.44 and later can be told not to.
         check_commit(commit).is_ok()
             && self
                 .git
-                .exec(
+                .run(
                     Some(&self.dir),
-                    &[],
-                    &["cat-file", "-e", &format!("{commit}^{{commit}}")],
-                    &[("GIT_NO_LAZY_FETCH", "1")],
+                    &[
+                        "rev-list",
+                        "-n1",
+                        "--missing=print",
+                        &format!("{commit}^{{commit}}"),
+                    ],
                 )
                 .is_ok()
     }
@@ -431,14 +452,15 @@ impl RepoCache {
     pub fn show(&self, commit: &str, path: &str) -> Result<Option<Vec<u8>>> {
         check_commit(commit)?;
         manifest::validate_rel_path("path", path)?;
-        let listed = self.git.run_text(
-            Some(&self.dir),
-            &["ls-tree", "--format=%(objecttype)", commit, "--", path],
-        )?;
-        if listed != "blob" {
+        let out = self.run(&["ls-tree", "-z", commit, "--", path])?;
+        let is_blob = parse_ls_tree(&out)
+            .iter()
+            .any(|e| e.path == path && e.kind == "blob");
+        if !is_blob {
             return Ok(None);
         }
-        self.run(&["show", &format!("{commit}:{path}")]).map(Some)
+        self.run(&["cat-file", "blob", &format!("{commit}:{path}")])
+            .map(Some)
     }
 
     /// Every folder that holds a `package.kdl` at a commit, `/`-separated,
@@ -468,63 +490,242 @@ impl RepoCache {
             .map_err(|_| Error::other(format!("git gave {t:?} as the time of {commit}")))
     }
 
-    /// Checks out one folder of a commit (the whole repository when `path`
-    /// is None) and copies it to `dest`, which must not exist yet. Nothing
-    /// else of the repository is checked out. Symlinks are refused.
+    /// Writes one folder of a commit (the whole repository when `path` is
+    /// None) to `dest`, which must not exist yet. The files are the blobs of
+    /// the commit as they are, with no attributes, line-ending conversion or
+    /// filter applied, so the same commit gives the same bytes on every
+    /// machine. Symlinks and submodules are refused.
     pub fn export(&self, commit: &str, path: Option<&str>, dest: &Path) -> Result<()> {
         check_commit(commit)?;
-        match path {
+        let prefix = match path {
             Some(p) => {
                 manifest::validate_rel_path("path", p)?;
-                self.run(&["sparse-checkout", "set", "--cone", "--", p])?;
+                Some(p.strip_prefix("./").unwrap_or(p).trim_end_matches('/'))
             }
-            None => {
-                self.run(&["sparse-checkout", "disable"])?;
+            None => None,
+        };
+        let mut args = vec!["ls-tree", "-r", "-z", commit];
+        if let Some(p) = prefix {
+            args.extend(["--", p]);
+        }
+        let listing = self.run(&args)?;
+        let mut files = Vec::new();
+        for e in parse_ls_tree(&listing) {
+            let rel = match prefix {
+                Some(p) => match e.path.strip_prefix(p).and_then(|r| r.strip_prefix('/')) {
+                    Some(r) => r,
+                    // The path is a file, not a folder.
+                    None => continue,
+                },
+                None => e.path.as_str(),
+            };
+            manifest::validate_rel_path("path", rel)?;
+            if rel.split('/').any(|c| c.eq_ignore_ascii_case(".git")) {
+                return Err(Error::invalid(&e.path, "is inside a .git folder"));
+            }
+            match e.mode.as_str() {
+                "100644" | "100755" | "100664" => files.push((rel.to_string(), e)),
+                "120000" => {
+                    return Err(Error::invalid(
+                        &e.path,
+                        "is a symlink, which a package cannot hold",
+                    ));
+                }
+                "160000" => {
+                    return Err(Error::invalid(
+                        &e.path,
+                        "is a submodule, which a package cannot hold",
+                    ));
+                }
+                mode => {
+                    return Err(Error::invalid(
+                        &e.path,
+                        format!("has the unsupported mode {mode}"),
+                    ));
+                }
             }
         }
-        self.run(&["checkout", "--quiet", "--force", "--detach", commit])?;
-        let src = match path {
-            Some(p) => self.dir.join(p),
-            None => self.dir.clone(),
-        };
-        if !src.is_dir() {
+        if files.is_empty() {
             return Err(Error::invalid(
                 path.unwrap_or("."),
                 format!("is not a folder at commit {commit}"),
             ));
         }
-        copy_tree(&src, dest, true)
+        let oids: Vec<&str> = files.iter().map(|(_, e)| e.oid.as_str()).collect();
+        self.fetch_blobs(commit, &oids)?;
+        fs::create_dir_all(dest).at_path(dest)?;
+        let mut next = files.iter();
+        self.read_blobs(&oids, |oid, content| {
+            let (rel, entry) = next
+                .next()
+                .filter(|(_, e)| e.oid == oid)
+                .ok_or_else(|| Error::other("git cat-file answered out of order"))?;
+            let to = dest.join(rel);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent).at_path(parent)?;
+            }
+            fs::write(&to, content).at_path(&to)?;
+            set_executable(&to, entry.mode == "100755")
+        })
+    }
+
+    /// Fetches the blobs of a commit that the cache lacks, in a few
+    /// requests. Git would fetch each one when it is first read, with one
+    /// connection for every file.
+    fn fetch_blobs(&self, commit: &str, oids: &[&str]) -> Result<()> {
+        // `--missing=print` lists what is not here instead of fetching it.
+        let out = self.run(&["rev-list", "--objects", "--missing=print", commit])?;
+        let text = String::from_utf8_lossy(&out);
+        let absent: std::collections::BTreeSet<&str> =
+            text.lines().filter_map(|l| l.strip_prefix('?')).collect();
+        let missing: std::collections::BTreeSet<&str> = oids
+            .iter()
+            .copied()
+            .filter(|o| absent.contains(o))
+            .collect();
+        let missing: Vec<&str> = missing.into_iter().collect();
+        for chunk in missing.chunks(100) {
+            let mut args = vec![
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "--recurse-submodules=no",
+                "--filter=blob:none",
+                "origin",
+            ];
+            args.extend(chunk);
+            self.git.exec(
+                Some(&self.dir),
+                // Without this, a fetch in a shallow repository checks that
+                // the blobs it asked for are commits, which fails. It is what
+                // git itself uses to fetch a missing object.
+                &["protocol.version=2", "fetch.negotiationAlgorithm=noop"],
+                &args,
+                &[],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Runs one `git cat-file --batch` for the blobs and hands each, in
+    /// order, to `each` with its id.
+    fn read_blobs(
+        &self,
+        oids: &[&str],
+        mut each: impl FnMut(&str, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let mut child = self
+            .git
+            .command(Some(&self.dir), &[], &["cat-file", "--batch"], &[])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::Git {
+                args: "cat-file --batch".into(),
+                message: format!("cannot run {}: {e}", self.git.program.display()),
+            })?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
+        let mut stderr = child.stderr.take().expect("stderr is piped");
+        let wanted: Vec<String> = oids.iter().map(|o| o.to_string()).collect();
+        // Written from another thread: git answers while it reads, and a full
+        // pipe in both directions would stop both processes.
+        let writer = std::thread::spawn(move || {
+            for oid in wanted {
+                if writeln!(stdin, "{oid}").is_err() {
+                    break;
+                }
+            }
+        });
+        let errors = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf);
+            buf
+        });
+        let result = (|| -> Result<()> {
+            let mut content = Vec::new();
+            for oid in oids {
+                let mut header = String::new();
+                stdout
+                    .read_line(&mut header)
+                    .map_err(|e| Error::other(format!("git cat-file: {e}")))?;
+                let parts: Vec<&str> = header.split_whitespace().collect();
+                let size = match parts.as_slice() {
+                    [id, "blob", size] if id == oid => size.parse::<usize>().ok(),
+                    _ => None,
+                };
+                let Some(size) = size else {
+                    return Err(Error::other(format!(
+                        "git cat-file did not give blob {oid}: {}",
+                        header.trim_end()
+                    )));
+                };
+                content.resize(size + 1, 0);
+                stdout
+                    .read_exact(&mut content)
+                    .map_err(|e| Error::other(format!("git cat-file: {e}")))?;
+                each(oid, &content[..size])?;
+            }
+            Ok(())
+        })();
+        drop(stdout);
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let _ = writer.join();
+        let status = child
+            .wait()
+            .map_err(|e| Error::other(format!("git: {e}")))?;
+        let stderr = errors.join().unwrap_or_default();
+        result?;
+        if !status.success() {
+            return Err(Error::Git {
+                args: "cat-file --batch".into(),
+                message: redact_text(&stderr_tail(&stderr, &status.to_string())),
+            });
+        }
+        Ok(())
     }
 }
 
-/// Copies a folder, refusing symlinks. `.git` at the top is not copied.
-fn copy_tree(src: &Path, dest: &Path, top: bool) -> Result<()> {
-    fs::create_dir_all(dest).at_path(dest)?;
-    let mut entries = fs::read_dir(src)
-        .at_path(src)?
-        .collect::<std::io::Result<Vec<_>>>()
-        .at_path(src)?;
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let name = e.file_name();
-        if top && name == ".git" {
-            continue;
-        }
-        let from = e.path();
-        let to = dest.join(&name);
-        let meta = fs::symlink_metadata(&from).at_path(&from)?;
-        if meta.file_type().is_symlink() {
-            return Err(Error::invalid(
-                from.display(),
-                "is a symlink, which a package cannot hold",
-            ));
-        }
-        if meta.is_dir() {
-            copy_tree(&from, &to, false)?;
-        } else {
-            fs::copy(&from, &to).at_path(&from)?;
-        }
-    }
+/// One line of `git ls-tree -z`.
+#[derive(Debug, PartialEq, Eq)]
+struct TreeEntry {
+    mode: String,
+    kind: String,
+    oid: String,
+    path: String,
+}
+
+/// Parses the default output of `git ls-tree -z`:
+/// `<mode> SP <type> SP <oid> TAB <path>`, each ended by a NUL.
+fn parse_ls_tree(out: &[u8]) -> Vec<TreeEntry> {
+    out.split(|b| *b == 0)
+        .filter_map(|rec| {
+            let text = std::str::from_utf8(rec).ok()?;
+            let (meta, path) = text.split_once('\t')?;
+            let mut it = meta.split(' ');
+            Some(TreeEntry {
+                mode: it.next()?.to_string(),
+                kind: it.next()?.to_string(),
+                oid: it.next()?.to_string(),
+                path: path.to_string(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn set_executable(path: &Path, exec: bool) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if exec { 0o755 } else { 0o644 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).at_path(path)
+}
+
+#[cfg(not(unix))]
+fn set_executable(_path: &Path, _exec: bool) -> Result<()> {
     Ok(())
 }
 
@@ -722,6 +923,20 @@ mod tests {
         drop(first);
         lock_path_within(&path, Duration::from_millis(150)).unwrap();
         assert!(path.exists(), "the lock file stays");
+    }
+
+    #[test]
+    fn reads_ls_tree_output() {
+        let out = b"100644 blob aaa\ta b.txt\x00100755 blob bbb\tdir/run\x00\
+                    160000 commit ccc\tsub\x00120000 blob ddd\tweird\nname\x00";
+        let e = parse_ls_tree(out);
+        assert_eq!(e.len(), 4);
+        assert_eq!(e[0].path, "a b.txt");
+        assert_eq!(e[0].mode, "100644");
+        assert_eq!(e[1].mode, "100755");
+        assert_eq!(e[2].kind, "commit");
+        assert_eq!(e[3].path, "weird\nname");
+        assert!(parse_ls_tree(b"").is_empty());
     }
 
     #[test]

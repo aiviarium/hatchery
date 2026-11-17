@@ -171,6 +171,7 @@ impl Fixture {
         let mut v: Vec<PathBuf> = fs::read_dir(&self.cache)
             .unwrap()
             .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
             .collect();
         v.sort();
         v
@@ -361,7 +362,7 @@ fn a_tag_whose_manifest_has_another_version_is_an_error() {
 }
 
 #[test]
-fn fetches_a_package_from_source_with_a_shallow_sparse_checkout() {
+fn fetches_a_package_from_source_with_a_shallow_clone() {
     let f = Fixture::new();
     let reg = f.registry();
     let a = versions(&reg, &alpha());
@@ -397,10 +398,9 @@ fn fetches_a_package_from_source_with_a_shallow_sparse_checkout() {
         git(cache, &["rev-parse", "--is-shallow-repository"]),
         "true"
     );
-    assert!(cache.join("agents/alpha/package.kdl").is_file());
-    assert!(!cache.join("agents/beta").exists());
-    assert!(!cache.join("shared").exists());
-    assert!(cache.join("packages.kdl").is_file());
+    // Nothing is checked out: files are read from the objects.
+    assert!(!cache.join("agents").exists());
+    assert!(!cache.join("packages.kdl").exists());
 
     // The next package of the repository reuses the folder.
     let b = versions(&reg, &beta());
@@ -408,8 +408,6 @@ fn fetches_a_package_from_source_with_a_shallow_sparse_checkout() {
     assert_eq!(beta_egg.manifest().name(), beta());
     assert_eq!(beta_egg.manifest().package.version.to_string(), "1.2.0");
     assert_eq!(f.cache_folders(), folders);
-    assert!(cache.join("agents/beta/package.kdl").is_file());
-    assert!(!cache.join("agents/alpha").exists());
 }
 
 #[test]
@@ -1090,7 +1088,7 @@ fn a_folder_says_whether_its_ref_is_a_tag() {
 }
 
 #[test]
-fn a_stale_lock_is_taken_over_and_a_live_one_is_kept() {
+fn a_lock_file_left_behind_does_not_block_and_stays() {
     let f = Fixture::new();
     let g = Git::new();
     let held = g.cache(&f.cache, &f.url).unwrap();
@@ -1099,26 +1097,142 @@ fn a_stale_lock_is_taken_over_and_a_live_one_is_kept() {
         .map(|e| e.unwrap().path())
         .find(|p| p.extension().is_some_and(|e| e == "lock"))
         .unwrap();
-    assert!(lock.exists());
     drop(held);
-    assert!(!lock.exists());
+    // The file is not removed, and a file that nobody holds is no lock.
+    assert!(lock.exists());
+    drop(g.cache(&f.cache, &f.url).unwrap());
+    assert!(lock.exists());
+}
 
-    // A lock left by a dead process, 40 minutes old.
-    fs::write(&lock, "dead\n").unwrap();
-    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 60);
-    fs::File::options()
-        .write(true)
-        .open(&lock)
-        .unwrap()
-        .set_modified(old)
+/// Commits a text file with LF endings, an executable and attributes that
+/// would convert line endings in a checkout.
+fn commit_attributes(f: &Fixture) -> String {
+    write(&f.work, ".gitattributes", "* text=auto eol=crlf\n");
+    write(&f.work, "agents/alpha/crow/text.txt", "one\ntwo\n");
+    let run = write(&f.work, "agents/alpha/crow/run.sh", "#!/bin/sh\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&run, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[cfg(not(unix))]
+    git(
+        &f.work,
+        &[
+            "update-index",
+            "--add",
+            "--chmod=+x",
+            "agents/alpha/crow/run.sh",
+        ],
+    );
+    let _ = run;
+    let commit = git_commit(&f.work, "attributes");
+    git(&f.work, &["push", "-q", "origin", "main"]);
+    commit
+}
+
+#[test]
+fn an_export_is_the_committed_bytes_whatever_the_configuration() {
+    let f = Fixture::new();
+    let commit = commit_attributes(&f);
+    let cache = Git::new().cache(&f.cache, &f.url).unwrap();
+    // A partial clone, as with a large repository: git sends the blobs of
+    // a shallow fetch anyway, so this fetch is not shallow.
+    git(
+        cache.dir(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "-q",
+            "--filter=blob:none",
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ],
+    );
+    // Nothing of the file is there yet.
+    let blob = git(&f.work, &["rev-parse", "HEAD:agents/alpha/crow/text.txt"]);
+    let listed = git(
+        cache.dir(),
+        &["rev-list", "--objects", "--missing=print", &commit],
+    );
+    assert!(listed.contains(&format!("?{blob}")), "{listed}");
+
+    let tmp = tempfile::tempdir().unwrap();
+    let plain = tmp.path().join("plain");
+    cache.export(&commit, Some("agents/alpha"), &plain).unwrap();
+    assert_eq!(
+        fs::read(plain.join("crow/text.txt")).unwrap(),
+        b"one\ntwo\n"
+    );
+
+    git(cache.dir(), &["config", "core.eol", "crlf"]);
+    git(cache.dir(), &["config", "core.autocrlf", "true"]);
+    let converting = tmp.path().join("converting");
+    cache
+        .export(&commit, Some("agents/alpha"), &converting)
         .unwrap();
-    let again = g.cache(&f.cache, &f.url).unwrap();
-    drop(again);
-    assert!(!lock.exists());
+    assert_eq!(
+        fs::read(converting.join("crow/text.txt")).unwrap(),
+        b"one\ntwo\n"
+    );
+    assert_eq!(
+        fs::read(converting.join("crow/run.sh")).unwrap(),
+        b"#!/bin/sh\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o111;
+        assert_ne!(mode(&converting.join("crow/run.sh")), 0);
+        assert_eq!(mode(&converting.join("crow/text.txt")), 0);
+    }
 
-    // A lock that someone else took over is not removed by the old holder.
-    let held = g.cache(&f.cache, &f.url).unwrap();
-    fs::write(&lock, "someone else\n").unwrap();
-    drop(held);
-    assert!(lock.exists());
+    // The whole repository too, with no `.git` in it.
+    let whole = tmp.path().join("whole");
+    cache.export(&commit, None, &whole).unwrap();
+    assert!(whole.join(".gitattributes").is_file());
+    assert!(!whole.join(".git").exists());
+    assert!(whole.join("agents/beta/crow/host.js").is_file());
+}
+
+#[test]
+fn symlinks_and_submodules_are_refused_by_an_export() {
+    let f = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = Git::new().cache(&f.cache, &f.url).unwrap();
+
+    git(
+        &f.work,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{},agents/alpha/sub", "1".repeat(40)),
+        ],
+    );
+    // Not `git_commit`: its `add -A` would drop the entry, as the folder is
+    // not there.
+    git(&f.work, &["commit", "-q", "-m", "submodule"]);
+    let commit = git(&f.work, &["rev-parse", "HEAD"]);
+    git(&f.work, &["push", "-q", "origin", "main"]);
+    cache.fetch_branch("main").unwrap();
+    let err = cache
+        .export(&commit, Some("agents/alpha"), &tmp.path().join("a"))
+        .unwrap_err();
+    assert!(err.to_string().contains("submodule"), "{err}");
+    // A folder next to it is fine.
+    cache
+        .export(&commit, Some("agents/beta"), &tmp.path().join("b"))
+        .unwrap();
+    // A file is not a folder, and a missing folder is not one either.
+    for p in ["agents/alpha/package.kdl", "agents/none"] {
+        let err = cache
+            .export(&commit, Some(p), &tmp.path().join("c"))
+            .unwrap_err();
+        assert!(err.to_string().contains("not a folder"), "{err}");
+    }
 }

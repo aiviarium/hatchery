@@ -18,7 +18,7 @@ To build it, you need Rust 1.95 or newer:
 cargo install --locked --git https://github.com/aiviarium/hatchery hatchery-cli
 ```
 
-Installing packages with git registries needs the `git` command.
+Installing packages with git registries needs the `git` command, version 2.25 or later.
 
 ## Quick start
 

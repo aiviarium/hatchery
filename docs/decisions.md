@@ -57,6 +57,8 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - A single-package source (a folder, an egg file, one git folder) answers `names()` with its one name and `versions(name)` with its one offer.
 - An offer with a commit from a git source must still resolve to that commit when fetched. If the tag points elsewhere now, the fetch fails with `TagMoved`.
 - `Fetch::get` returns `Ok(None)` for a 404, so that a search over several registries can go on to the next.
+- A package from a git source is the committed files of its folder, read from the objects. Attributes, line-ending settings and filters of the machine are not applied. A tag gives the same egg everywhere. Symlinks and submodules are refused. Executable files keep their bit.
+- Hatchery needs git 2.25 or later. That has `--filter` and protocol version 2 for fetching, `rev-list --missing=print` to ask what is in the cache without fetching it, and `ls-remote --symref`. Hatchery uses nothing that needs a later version: `ls-tree --format` and `GIT_NO_LAZY_FETCH` are not used.
 
 ## The command line
 

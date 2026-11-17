@@ -97,11 +97,11 @@ registries {
 - What it offers is read from `packages.kdl` on the default branch.
 - Versions are tags, matched against the tag pattern. The version in the manifest at the tag must match the tag.
 - Ranges and update checks read the tag list with `git ls-remote`. 
-- Fetching is a shallow, sparse checkout of the package's folder only. One cached copy per repository is reused for all its packages.
+- Fetching is a shallow, partial clone. Hatchery reads the package's folder from it. The files are the committed bytes, with no line-ending conversion or filters from `.gitattributes` or your git configuration. One cached copy per repository is reused for all its packages.
 - The lock file records the commit. If a tag later points at a different commit, Hatchery refuses to install and says so.
 - Access is git's own, through SSH keys, credential helpers or a token in CI. A private repository takes no Hatchery setting.
 - For development, a branch works as a ref (`--ref main`), and an update resolves it again.
-- The `git` command must be installed where eggs are installed.
+- The `git` command, version 2.25 or later, must be installed where eggs are installed.
 
 ### Targets that need a build
 
