@@ -1,8 +1,9 @@
 //! A deterministic POSIX ustar writer and a strict reader for gzipped tar
 //! archives. The reader refuses `..`, absolute paths, symlinks, hardlinks
-//! and special files.
+//! and special files, and names that are unsafe to unpack on some systems:
+//! `.git`, names Windows cannot hold and paths that differ only by case.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 
 use bytes::Bytes;
@@ -44,6 +45,9 @@ pub fn write(entries: &[Entry]) -> Result<Vec<u8>> {
         if !seen.insert(e.path.as_str()) {
             return Err(bad(format!("duplicate entry {:?}", e.path)));
         }
+    }
+    if let Some(problem) = collision(sorted.iter().map(|e| e.path.as_str())) {
+        return Err(bad(problem));
     }
     let gz = GzBuilder::new()
         .mtime(0)
@@ -210,15 +214,8 @@ pub fn read_limited(bytes: &[u8], max_total: u64) -> Result<Vec<Entry>> {
         });
         Ok(())
     })?;
-    // A file may not also be a folder.
-    for e in &entries {
-        let mut at = e.path.as_str();
-        while let Some((parent, _)) = at.rsplit_once('/') {
-            if seen.contains(parent) {
-                return Err(bad(format!("{:?} is both a file and a folder", parent)));
-            }
-            at = parent;
-        }
+    if let Some(problem) = collision(entries.iter().map(|e| e.path.as_str())) {
+        return Err(bad(problem));
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
@@ -482,8 +479,78 @@ fn validate_entry_path(raw: &str, is_dir: bool) -> Result<Option<String>> {
         if seg.is_empty() || seg == "." || seg == ".." {
             return Err(bad(format!("path {raw:?} escapes or is invalid")));
         }
+        if let Some(why) = component_problem(seg) {
+            return Err(bad(format!("path {raw:?} {why}")));
+        }
     }
     Ok(Some(trimmed.to_string()))
+}
+
+/// Windows device names, which cannot be files whatever the extension.
+const DEVICE_NAMES: [&str; 4] = ["con", "prn", "aux", "nul"];
+
+/// Why one component of a path is unsafe to unpack, or None. `.git` would
+/// let an egg run code when git runs in the install folder, and the other
+/// names are refused because Windows reads them as something else or
+/// cannot hold them.
+fn component_problem(seg: &str) -> Option<String> {
+    let lower = seg.to_ascii_lowercase();
+    if lower == ".git" || lower == "git~1" {
+        return Some("has a .git component".to_string());
+    }
+    if let Some(c) = seg
+        .chars()
+        .find(|c| c.is_control() || "<>:\"|?*".contains(*c))
+    {
+        return Some(format!("has {c:?}, which Windows does not allow in names"));
+    }
+    if seg.ends_with(['.', ' ']) {
+        // Also covers `.git.` and `.git `, which Windows reads as `.git`.
+        return Some("has a component ending in a dot or a space".to_string());
+    }
+    let stem = lower.split('.').next().unwrap_or("");
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+    };
+    if DEVICE_NAMES.contains(&stem) || numbered("com") || numbered("lpt") {
+        return Some("has a component that is a Windows device name".to_string());
+    }
+    None
+}
+
+/// Finds paths that would overwrite each other on a system that ignores
+/// case, or where a file would also be a folder.
+fn collision<'a>(paths: impl Iterator<Item = &'a str> + Clone) -> Option<String> {
+    let mut files: HashMap<String, &str> = HashMap::new();
+    for p in paths.clone() {
+        if let Some(other) = files.insert(p.to_lowercase(), p)
+            && other != p
+        {
+            return Some(format!("{other:?} and {p:?} differ only by case"));
+        }
+    }
+    for p in paths {
+        let mut at = p;
+        while let Some((parent, _)) = at.rsplit_once('/') {
+            if let Some(file) = files.get(&parent.to_lowercase()) {
+                return Some(format!("{file:?} is both a file and a folder"));
+            }
+            at = parent;
+        }
+    }
+    None
+}
+
+/// What is wrong with the paths of files to pack, in words for an error,
+/// or None when all of them are safe to unpack.
+pub(crate) fn unsafe_paths<'a>(paths: impl Iterator<Item = &'a str> + Clone) -> Option<String> {
+    for p in paths.clone() {
+        if let Some(why) = p.split('/').find_map(component_problem) {
+            return Some(format!("{p:?} {why}"));
+        }
+    }
+    collision(paths)
 }
 
 #[cfg(test)]
@@ -591,6 +658,71 @@ mod tests {
         assert!(matches!(read(&broken), Err(Error::UnsafeArchive(_))));
 
         assert!(matches!(read(b"not gzip"), Err(Error::UnsafeArchive(_))));
+    }
+
+    #[test]
+    fn refuses_git_windows_and_case_colliding_names() {
+        let refused = [
+            ".git/config",
+            "a/.GIT/config",
+            ".Git",
+            "GIT~1/config",
+            "git~1/config",
+            ".git./config",
+            ".git /config",
+            ".git::$INDEX_ALLOCATION/config",
+            "a<b",
+            "a>b",
+            "a\"b",
+            "a|b",
+            "a?b",
+            "a*b",
+            "a\x01b",
+            "con",
+            "CON.txt",
+            "d/nul.txt",
+            "Aux",
+            "prn.tar.gz",
+            "com1",
+            "COM9.txt",
+            "lpt3",
+            "trailing.",
+            "trailing ",
+        ];
+        for path in refused {
+            let pkg = make_raw_targz(vec![(path, b'0', b"x")]);
+            let err = read(&pkg).unwrap_err();
+            assert!(matches!(err, Error::UnsafeArchive(_)), "{path:?}: {err:?}");
+            assert!(write(&[entry(path, "x", false)]).is_err(), "{path:?}");
+        }
+        for path in [
+            "gitignore",
+            ".github/a",
+            "a.git",
+            "com0",
+            "com10",
+            "lpt",
+            "console",
+            "x/.gitignore",
+        ] {
+            let pkg = make_raw_targz(vec![(path, b'0', b"x")]);
+            assert!(read(&pkg).is_ok(), "{path:?}");
+        }
+    }
+
+    #[test]
+    fn refuses_paths_that_differ_only_by_case() {
+        let cases = [
+            vec![("a.txt", b'0', &b"1"[..]), ("A.TXT", b'0', b"2")],
+            vec![("A", b'0', b"1"), ("a/b", b'0', b"2")],
+            vec![("d/x", b'0', b"1"), ("D/X", b'0', b"2")],
+        ];
+        for case in cases {
+            let err = read(&make_raw_targz(case)).unwrap_err();
+            assert!(matches!(err, Error::UnsafeArchive(_)), "{err:?}");
+        }
+        assert!(write(&[entry("a", "", false), entry("A", "", false)]).is_err());
+        assert!(write(&[entry("A", "", false), entry("a/b", "", false)]).is_err());
     }
 
     #[test]

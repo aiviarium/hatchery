@@ -1019,3 +1019,75 @@ fn packing_a_folder_outside_git_is_reproducible() {
         assert_eq!(first.manifest().origin.as_ref().unwrap().built, None);
     }
 }
+
+/// A gzipped ustar archive of files, written by hand so that it can hold
+/// paths the writer of the library refuses.
+fn raw_egg(files: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    for (path, data) in files {
+        let mut hdr = [0u8; 512];
+        hdr[..path.len()].copy_from_slice(path.as_bytes());
+        hdr[100..108].copy_from_slice(b"0000644\0");
+        hdr[108..116].copy_from_slice(b"0000000\0");
+        hdr[116..124].copy_from_slice(b"0000000\0");
+        hdr[124..136].copy_from_slice(format!("{:011o}\0", data.len()).as_bytes());
+        hdr[136..148].copy_from_slice(b"00000000000\0");
+        hdr[148..156].fill(b' ');
+        hdr[156] = b'0';
+        hdr[257..263].copy_from_slice(b"ustar\0");
+        hdr[263..265].copy_from_slice(b"00");
+        let sum: u32 = hdr.iter().map(|&b| u32::from(b)).sum();
+        hdr[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        gz.write_all(&hdr).unwrap();
+        gz.write_all(data).unwrap();
+        gz.write_all(&vec![0u8; (512 - data.len() % 512) % 512])
+            .unwrap();
+    }
+    gz.write_all(&[0u8; 1024]).unwrap();
+    gz.finish().unwrap()
+}
+
+#[test]
+fn open_refuses_an_egg_with_a_git_folder() {
+    let manifest: &[u8] = b"format 1\npackage {\n  group demo\n  id evil\n  version \"1.0.0\"\n}\ntargets {\n  crow\n}\n";
+    let good = raw_egg(&[("package.kdl", manifest), ("crow/plugin.json", b"{}")]);
+    Egg::open(good).unwrap();
+    for bad in [
+        ".git/config",
+        ".GIT/config",
+        "git~1/config",
+        ".git./config",
+        "crow/.git/HEAD",
+    ] {
+        let egg = raw_egg(&[
+            ("package.kdl", manifest),
+            ("crow/plugin.json", b"{}"),
+            (bad, b"[core]\n"),
+        ]);
+        let err = Egg::open(egg).unwrap_err();
+        assert!(matches!(err, Error::UnsafeArchive(_)), "{bad}: {err:?}");
+    }
+}
+
+#[test]
+fn pack_refuses_unsafe_names() {
+    for bad in [".git/config", "con.txt", "Readme.md", "a:b"] {
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            "package.kdl",
+            "package {\n  group g\n  id demo\n  version \"1.0.0\"\n}\ntargets {\n  crow\n}\n",
+        );
+        write(d.path(), "crow/readme.md", "a");
+        write(d.path(), &format!("crow/{bad}"), "b");
+        let o = PackOptions {
+            base: true,
+            no_build: true,
+            ..Default::default()
+        };
+        let err = pack(d.path(), &o).unwrap_err();
+        assert!(err.to_string().contains(bad), "{bad}: {err}");
+        assert!(!matches!(err, Error::UnsafeArchive(_)), "{bad}: {err:?}");
+    }
+}

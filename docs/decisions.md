@@ -32,6 +32,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
   - `variant.kdl`, the header, with `format 1` and a `variant` node holding `group`, `id`, `version`, `target` and the `os` and `arch` lines the variant has. The fallback variant has neither.
   - `<target>/variants/<key>/<path>` for the variant's files.
 - A fat egg is the base egg's entries plus `variants/<variant egg file name>`, each the complete bytes of a variant egg. Removing those entries and writing again gives the base egg byte for byte.
+- An egg may not hold a `.git` component in any case, `git~1`, a component ending in a dot or a space, Windows-invalid characters or device names, or two paths that differ only by case. A `.git` folder in an install folder runs code when someone runs git there, and the other names clash or change meaning on Windows and macOS. The reader and `pack` both refuse them.
 - `origin.built` is `SOURCE_DATE_EPOCH` if set, else the commit time of `HEAD` when the folder is in a git checkout, else it is left out. Packing the same folder twice gives the same egg.
 - `origin.repository` is `about.repository`, else the `origin` remote of the checkout with any user and password removed.
 

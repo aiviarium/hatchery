@@ -16,7 +16,7 @@ Eggs come in three kinds:
 
 Hatchery reads all three everywhere. Removing the variant eggs from a fat egg gives the base egg back, byte for byte.
 
-Unpacking refuses `..`, absolute paths, symlinks and hardlinks.
+Unpacking refuses `..`, absolute paths, symlinks and hardlinks. It also refuses a `.git` folder, and the names Windows treats as `.git`. It refuses names Windows cannot hold, such as `con`, `nul.txt`, `a:b` or a name that ends in a dot or a space. It refuses two paths that differ only by case. `hatchery pack` refuses the same names.
 
 ## Targets
 

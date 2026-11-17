@@ -7,6 +7,7 @@ use std::process::Command;
 
 use bytes::Bytes;
 
+use crate::archive;
 use crate::egg::{Egg, Entry, VARIANT_FILE, VARIANTS_DIR, VariantHeader};
 use crate::error::{Error, IoContext, Result};
 use crate::glob::Glob;
@@ -371,7 +372,17 @@ fn variant_egg(dir: &Path, manifest: &Manifest, t: &TargetSpec, v: &VariantSpec)
     for f in walk(&root, &|_| false)? {
         entries.push(read_entry(format!("{}/{}", header.dir(), f.rel), &f.path)?);
     }
+    check_paths(&entries)?;
     Egg::from_entries(entries)
+}
+
+/// Refuses files that an egg could not unpack safely, such as a `.git`
+/// folder or names that differ only by case.
+fn check_paths(entries: &[Entry]) -> Result<()> {
+    match archive::unsafe_paths(entries.iter().map(|e| e.path.as_str())) {
+        Some(problem) => Err(Error::invalid("package", problem)),
+        None => Ok(()),
+    }
 }
 
 fn base_egg(dir: &Path, source: &Manifest, flat: &Manifest) -> Result<Egg> {
@@ -415,7 +426,9 @@ fn base_egg(dir: &Path, source: &Manifest, flat: &Manifest) -> Result<Egg> {
             executable: false,
         },
     );
-    Egg::from_entries(by_path.into_values().collect())
+    let entries: Vec<Entry> = by_path.into_values().collect();
+    check_paths(&entries)?;
+    Egg::from_entries(entries)
 }
 
 // Origin.
