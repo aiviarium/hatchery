@@ -49,10 +49,12 @@ pub trait Target: Send + Sync {
 pub struct Problem {
     /// The file, relative to the target's folder.
     pub path: Option<String>,
+    /// What is wrong, as a sentence for people.
     pub message: String,
 }
 
 impl Problem {
+    /// A problem that is not about one file.
     pub fn new(message: impl Into<String>) -> Problem {
         Problem {
             path: None,
@@ -60,6 +62,7 @@ impl Problem {
         }
     }
 
+    /// A problem in one file. `path` is relative to the target's folder.
     pub fn in_file(path: impl Into<String>, message: impl Into<String>) -> Problem {
         Problem {
             path: Some(path.into()),
@@ -81,11 +84,14 @@ impl fmt::Display for Problem {
 /// (`/`-separated). The `variants/` folder is not part of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetFiles {
+    /// The target the files belong to.
     pub target: String,
+    /// The files by path, relative to the target's folder and `/`-separated, with their contents.
     pub files: BTreeMap<String, Bytes>,
 }
 
 impl TargetFiles {
+    /// The files of `target`. The paths are not checked.
     pub fn new(target: impl Into<String>, files: BTreeMap<String, Bytes>) -> TargetFiles {
         TargetFiles {
             target: target.into(),
@@ -93,18 +99,22 @@ impl TargetFiles {
         }
     }
 
+    /// The contents of the file at `path`. None when there is no such file.
     pub fn get(&self, path: &str) -> Option<&[u8]> {
         self.files.get(path).map(|b| b.as_ref())
     }
 
+    /// The paths of the files, in sorted order.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.files.keys().map(String::as_str)
     }
 
+    /// The number of files.
     pub fn len(&self) -> usize {
         self.files.len()
     }
 
+    /// Whether there are no files.
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
     }
@@ -114,12 +124,16 @@ impl TargetFiles {
 /// with `--target` and `--fact`, and tests use it.
 #[derive(Debug, Clone)]
 pub struct StaticTarget {
+    /// The target's name, such as `crow`.
     pub name: String,
+    /// The facts it answers, by name. Any other name is absent, except `os` and `arch`, which come from the platform of `variants`.
     pub facts: BTreeMap<String, String>,
+    /// Which variants the target fetches at install.
     pub variants: Variants,
 }
 
 impl StaticTarget {
+    /// A target with a name, no facts, and the variant for the machine this runs on.
     pub fn new(name: impl Into<String>) -> StaticTarget {
         StaticTarget {
             name: name.into(),
@@ -128,11 +142,13 @@ impl StaticTarget {
         }
     }
 
+    /// Sets the answer for a fact. A `requires` line for that fact is compared with this value.
     pub fn fact(mut self, name: impl Into<String>, value: impl Into<String>) -> StaticTarget {
         self.facts.insert(name.into(), value.into());
         self
     }
 
+    /// Sets which variants the target fetches at install.
     pub fn variants(mut self, variants: Variants) -> StaticTarget {
         self.variants = variants;
         self

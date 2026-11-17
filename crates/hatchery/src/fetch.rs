@@ -20,6 +20,7 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub struct Token(String);
 
 impl Token {
+    /// A token with this text. [`Token::from_env`] keeps the secret out of the code.
     pub fn new(secret: impl Into<String>) -> Token {
         Token(secret.into())
     }

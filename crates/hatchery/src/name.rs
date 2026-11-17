@@ -12,7 +12,9 @@ use crate::error::{Error, Result};
 /// A package's group and id, written `group/id`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Name {
+    /// The group, who publishes the package. Letters, digits, `-`, `_` and `.`.
     pub group: String,
+    /// The id of the package in its group. The same characters as the group.
     pub id: String,
 }
 
@@ -40,6 +42,7 @@ pub fn validate_segment(kind: &str, s: &str) -> Result<()> {
 }
 
 impl Name {
+    /// A name from a group and an id. Fails with [`Error::Invalid`] when either is not a valid folder name, see [`validate_segment`].
     pub fn new(group: impl Into<String>, id: impl Into<String>) -> Result<Name> {
         let (group, id) = (group.into(), id.into());
         validate_segment("group", &group)?;
@@ -111,6 +114,7 @@ pub fn parse_version(s: &str) -> Result<Version> {
 pub struct Wanted {
     /// None when the id alone was given; the registries then decide.
     pub group: Option<String>,
+    /// The id of the package.
     pub id: String,
     /// None means the newest allowed version.
     pub range: Option<VersionReq>,
@@ -119,6 +123,7 @@ pub struct Wanted {
 }
 
 impl Wanted {
+    /// The range to resolve, any version when none was given.
     pub fn range(&self) -> VersionReq {
         self.range.clone().unwrap_or(VersionReq::STAR)
     }
@@ -139,6 +144,7 @@ pub enum Spec {
     Registry(Wanted),
     /// One folder of a git repository at one ref. No ranges.
     Git {
+        /// The repository, as an address or a path that `git` takes. An empty text, one that starts with `-`, and one with control characters are refused when it is used.
         url: String,
         /// The package's folder in the repository; the root when None.
         path: Option<String>,

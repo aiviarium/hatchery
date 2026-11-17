@@ -12,16 +12,23 @@ use crate::kdlx;
 use crate::manifest::{self, Defaults, FORMAT, validate_rel_path};
 use crate::name::{parse_version, validate_segment};
 
+/// The name of the file, at the root of a repository.
 pub const FILE: &str = "packages.kdl";
 /// The tag pattern when `release.tag` is not given.
 pub const DEFAULT_TAG: &str = "v{version}";
 
+/// The root manifest of a repository that holds packages: the defaults they share, where they are and how they are released.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepoManifest {
+    /// The `format` number of the file.
     pub format: u32,
+    /// The values every package of the repository takes when its own `package.kdl` leaves them out.
     pub defaults: Defaults,
+    /// The `find` and `package` lines, in file order.
     pub packages: Vec<PackageEntry>,
+    /// How releases are tagged, where built eggs go and which versions are withdrawn.
     pub release: Release,
+    /// Nodes Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
@@ -29,24 +36,39 @@ pub struct RepoManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageEntry {
     /// Every folder matching the glob that has a `package.kdl`.
-    Find { glob: String, tag: Option<String> },
+    Find {
+        /// The glob, relative to the root of the repository and `/`-separated.
+        glob: String,
+        /// The tag pattern of the packages it finds. None means the release's one.
+        tag: Option<String>,
+    },
     /// One folder.
-    One { path: String, tag: Option<String> },
+    One {
+        /// The package's folder, relative to the root of the repository.
+        path: String,
+        /// The tag pattern of the package. None means the release's one.
+        tag: Option<String>,
+    },
 }
 
+/// The `release` block of `packages.kdl`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Release {
     /// The tag pattern for all packages, with `{version}` (and optionally
     /// `{id}`) in it.
     pub tag: Option<String>,
+    /// Where built eggs are published. None when the repository publishes none.
     pub eggs: Option<EggsBranch>,
+    /// The versions that were released and must not be installed.
     pub withdrawn: Vec<Withdrawal>,
+    /// Nodes of the `release` block that Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
 /// Where built eggs are published: a branch, and a folder in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EggsBranch {
+    /// The branch that holds the eggs.
     pub branch: String,
     /// A folder of the branch; its root when None.
     pub path: Option<String>,
@@ -57,7 +79,9 @@ pub struct EggsBranch {
 pub struct Withdrawal {
     /// The package's id, or `group/id`.
     pub package: String,
+    /// The withdrawn version, a complete version.
     pub version: Version,
+    /// Why it was withdrawn. None when no reason was given.
     pub reason: Option<String>,
 }
 
@@ -65,11 +89,14 @@ pub struct Withdrawal {
 /// pattern of its releases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoPackage {
+    /// The package's folder, relative to the root of the repository and `/`-separated.
     pub path: String,
+    /// The tag pattern of the package's releases, its own or the release's one.
     pub tag: String,
 }
 
 impl RepoManifest {
+    /// Reads the text of a `packages.kdl`. Fails with [`Error::Invalid`] when the KDL is wrong, a tag pattern does not hold `{version}` once, or a `packages` line is neither `find` nor `package`.
     pub fn parse(text: &str) -> Result<RepoManifest> {
         let what = FILE;
         let doc = kdlx::parse(text, what)?;
@@ -112,6 +139,7 @@ impl RepoManifest {
         Ok(r)
     }
 
+    /// Reads a `packages.kdl` from a path. Fails with [`Error::Io`] when it cannot be read, and with [`Error::Invalid`] naming the path when it is not valid.
     pub fn load(path: &Path) -> Result<RepoManifest> {
         let text = fs::read_to_string(path).at_path(path)?;
         RepoManifest::parse(&text).map_err(|e| match e {

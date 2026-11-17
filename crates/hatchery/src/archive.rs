@@ -77,8 +77,8 @@ impl<W: Write> TarWriter<W> {
                 "PaxHeaders/{}",
                 e.path.rsplit('/').next().unwrap_or("entry")
             );
-            let (pn, _, _) = split_ustar_path(&pax_name);
-            let hdr = build_header(&pn, "", 0o644, pax.len() as u64, b'x');
+            let (pax_path, _, _) = split_ustar_path(&pax_name);
+            let hdr = build_header(&pax_path, "", 0o644, pax.len() as u64, b'x');
             self.inner.write_all(&hdr)?;
             self.inner.write_all(pax.as_bytes())?;
             write_padding(&mut self.inner, pax.len() as u64)?;

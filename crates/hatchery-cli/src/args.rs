@@ -106,7 +106,7 @@ pub struct Publish {
 
 #[derive(Args, Debug)]
 pub struct Source {
-    /// The package: group/id[@range], a folder, an egg file or an https address
+    /// The package: `group/id[@range]`, a folder, an egg file or an https address
     #[arg(required_unless_present = "git")]
     pub spec: Option<String>,
     /// One folder of a git repository instead of a registry

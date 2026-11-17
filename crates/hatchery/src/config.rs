@@ -14,6 +14,7 @@ use crate::error::{Error, IoContext, Result};
 use crate::kdlx;
 use crate::time::{format_duration, parse_duration};
 
+/// The name of the configuration file, in the current folder and in the user's configuration folder.
 pub const FILE: &str = "hatchery.kdl";
 /// The variable that points at a different configuration file.
 pub const ENV: &str = "HATCHERY_CONFIG";
@@ -21,8 +22,10 @@ pub const ENV: &str = "HATCHERY_CONFIG";
 /// neither the registry nor the `default` line says.
 pub const NETWORK_MIN_AGE: Duration = Duration::from_secs(3 * 86_400);
 
+/// The registries an installation searches and how long new versions wait. It is read from `hatchery.kdl`, and editing it keeps the file's comments and layout.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The minimum release age of registries that have no `min-age` of their own. None when the file has no `default` line. [`Config::min_age_for`] gives the age that applies.
     pub default_min_age: Option<Duration>,
     /// In search order.
     pub registries: Vec<RegistryConfig>,
@@ -40,6 +43,7 @@ pub struct RegistryConfig {
     pub only: Vec<String>,
     /// An Ed25519 public key, `ed25519:<hex>`. Eggs must then be signed.
     pub key: Option<String>,
+    /// The minimum release age of this registry. None means the `default` line, or the built-in age when there is none.
     pub min_age: Option<Duration>,
     /// The environment variable that carries a token.
     pub token_env: Option<String>,
@@ -48,6 +52,7 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
+    /// A registry line with only its kind and location. The other settings are empty.
     pub fn new(kind: impl Into<String>, location: impl Into<String>) -> RegistryConfig {
         RegistryConfig {
             kind: kind.into(),
@@ -147,6 +152,7 @@ impl Config {
         Config::parse("").expect("an empty document parses")
     }
 
+    /// Reads the text of a `hatchery.kdl`. Fails with [`Error::Invalid`] when the KDL is wrong, a duration is not valid, or a `key` is not an Ed25519 public key.
     pub fn parse(text: &str) -> Result<Config> {
         let what = FILE;
         let doc = kdlx::parse(text, what)?;
@@ -175,6 +181,7 @@ impl Config {
         Ok(c)
     }
 
+    /// Reads a `hatchery.kdl` from a path. Fails with [`Error::Io`] when the file cannot be read, and with [`Error::Invalid`] naming the path when it is not valid.
     pub fn load(path: &Path) -> Result<Config> {
         let text = fs::read_to_string(path).at_path(path)?;
         Config::parse(&text).map_err(|e| match e {
@@ -306,6 +313,7 @@ impl Config {
         self.doc.to_string()
     }
 
+    /// Writes the file to `path`, replacing it in one step. Fails with [`Error::Io`] when it cannot be written.
     pub fn save(&self, path: &Path) -> Result<()> {
         crate::fsx::write_atomic(path, self.to_kdl().as_bytes())
     }

@@ -10,10 +10,13 @@ use crate::error::{Error, IoContext, Result};
 use crate::fsx::write_atomic;
 use crate::name::Name;
 
+/// The name of the lock file in an install folder.
 pub const FILE: &str = "eggs.lock";
 
+/// The packages installed in a folder. It is the content of `eggs.lock`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lock {
+    /// The installed packages. [`Lock::save`] writes them sorted by name.
     #[serde(default, rename = "package")]
     pub packages: Vec<LockedPackage>,
 }
@@ -21,7 +24,9 @@ pub struct Lock {
 /// One installed package.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockedPackage {
+    /// The package.
     pub name: Name,
+    /// The installed version.
     pub version: Version,
     /// The targets installed from it.
     pub targets: Vec<String>,
@@ -31,10 +36,13 @@ pub struct LockedPackage {
     /// A git repository the package came from (a git registry or one folder).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<String>,
+    /// The package's folder in the repository. Set for a git registry and for one git folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// The tag or branch the version was taken from. Set for a git registry and for one git folder.
     #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
     pub git_ref: Option<String>,
+    /// The commit the version was taken from. A later install checks that the tag still points at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     /// An egg file or URL it was installed from.
@@ -71,10 +79,12 @@ impl Lock {
         write_atomic(&dir.join(FILE), text.as_bytes())
     }
 
+    /// The entry of a package. None when it is not installed.
     pub fn get(&self, name: &Name) -> Option<&LockedPackage> {
         self.packages.iter().find(|p| &p.name == name)
     }
 
+    /// The entry of a package, to change. None when it is not installed.
     pub fn get_mut(&mut self, name: &Name) -> Option<&mut LockedPackage> {
         self.packages.iter_mut().find(|p| &p.name == name)
     }

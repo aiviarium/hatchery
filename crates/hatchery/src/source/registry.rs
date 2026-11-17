@@ -27,6 +27,7 @@ pub struct StaticRegistry {
 }
 
 impl StaticRegistry {
+    /// A registry over any [`RegistryFiles`]. With a `key`, an egg must be signed by it.
     pub fn new(files: Arc<dyn RegistryFiles>, key: Option<VerifyingKey>) -> StaticRegistry {
         StaticRegistry { files, key }
     }
@@ -281,12 +282,14 @@ pub struct DirFiles {
 }
 
 impl DirFiles {
+    /// A registry folder at `path`. The path is its label.
     pub fn new(path: impl Into<PathBuf>) -> DirFiles {
         let root = path.into();
         let label = root.display().to_string();
         DirFiles { root, label }
     }
 
+    /// The registry folder.
     pub fn path(&self) -> &Path {
         &self.root
     }
@@ -322,6 +325,7 @@ pub struct HttpFiles {
 }
 
 impl HttpFiles {
+    /// The files under `base`. `fetch` gets each of them, with `token` as the bearer token when there is one. A trailing `/` of `base` is dropped from the label.
     pub fn new(base: Url, fetch: Arc<dyn Fetch>, token: Option<Token>) -> HttpFiles {
         let label = base.as_str().trim_end_matches('/').to_string();
         HttpFiles {

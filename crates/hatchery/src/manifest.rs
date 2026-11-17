@@ -21,10 +21,14 @@ pub const FILE: &str = "package.kdl";
 /// The manifest format this crate reads and writes.
 pub const FORMAT: u32 = 1;
 
+/// The manifest of one package, `package.kdl`. [`Manifest::parse`] and [`Manifest::load`] read it, and [`Manifest::to_kdl`] writes it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Manifest {
+    /// The `format` number. [`FORMAT`] when the file has none.
     pub format: u32,
+    /// The package's identity.
     pub package: Package,
+    /// The display data.
     pub about: About,
     /// In the order they are listed, which is the order they build in.
     pub targets: Vec<TargetSpec>,
@@ -34,46 +38,68 @@ pub struct Manifest {
     pub extra: Vec<KdlNode>,
 }
 
+/// The `package` section: the identity of a package.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Package {
+    /// Who publishes the package. Letters, digits, `-`, `_` and `.`, not starting with `.`.
     pub group: String,
+    /// The package's id in its group. The same characters as the group.
     pub id: String,
+    /// The version of the whole package, a complete semver version.
     pub version: Version,
+    /// Nodes of the `package` section that Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
 /// Display data. Nothing here affects resolution or installing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct About {
+    /// A display name, such as `Claude Code`.
     pub name: Option<String>,
+    /// One sentence about the package.
     pub summary: Option<String>,
     /// Paths in the package folder.
     pub icon: Option<String>,
+    /// The readme, as a path in the package folder.
     pub readme: Option<String>,
+    /// The changelog, as a path in the package folder.
     pub changelog: Option<String>,
     /// SPDX identifiers; the package may be used under any one of them.
     pub licenses: Vec<String>,
+    /// One entry for each `author` line.
     pub authors: Vec<String>,
+    /// The address of the project's home page.
     pub homepage: Option<String>,
+    /// The address of the source repository.
     pub repository: Option<String>,
+    /// Words to find the package by.
     pub keywords: Vec<String>,
+    /// Nodes of the `about` section that Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
+/// One target of a package: the content for one tool, with what the tool needs to install it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TargetSpec {
+    /// The target's name, such as `crow`. ASCII letters, digits, `-` and `_`, and never `variants`.
     pub name: String,
     /// The target's folder in the package; the target's name when None.
     pub path: Option<String>,
     /// The file the `--check` schema applies to; `<name>.json` when None.
     pub manifest: Option<String>,
+    /// The command `hatchery pack` runs in the package folder before it reads the target's folder. None when the target needs no build.
     pub build: Option<String>,
+    /// The lines of the `requires` block. Every line must hold, or the target is not installed.
     pub requires: Vec<Requirement>,
+    /// The packages the target needs. They are installed with the package.
     pub dependencies: Vec<Dependency>,
+    /// The packages the target can use. They are installed when they can be and skipped when they cannot.
     pub optional_dependencies: Vec<Dependency>,
     /// Glob patterns relative to the target's folder.
     pub include: Vec<String>,
+    /// Glob patterns, relative to the target's folder, for files that are left out of the egg. A pattern that names a folder takes everything in it.
     pub exclude: Vec<String>,
+    /// The `variant` lines, in the order they were written. The first one that matches a platform is used.
     pub variants: Vec<VariantSpec>,
     /// Child nodes Hatchery does not know.
     pub extra: Vec<KdlNode>,
@@ -84,21 +110,27 @@ pub struct TargetSpec {
 /// One line of a `requires` block: a fact and the values wanted for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Requirement {
+    /// The fact name, such as `os` or `rookery`.
     pub fact: String,
+    /// The values the line accepts. Empty when the fact only has to be present.
     pub values: Vec<String>,
 }
 
+/// One line of `dependencies` or `optional-dependencies`: a package and the versions that are wanted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
+    /// The id of the package.
     pub id: String,
     /// None means the package's own group.
     pub group: Option<String>,
     /// As written; `*` when the line has no range.
     pub raw: String,
+    /// The versions that are wanted, parsed from `raw`.
     pub range: VersionReq,
 }
 
 impl Dependency {
+    /// The full name of the package. `own_group` is the group of the package that has the dependency, for a line that names none.
     pub fn name(&self, own_group: &str) -> Name {
         Name {
             group: self.group.clone().unwrap_or_else(|| own_group.to_string()),
@@ -110,12 +142,16 @@ impl Dependency {
 /// A folder laid over the target's files for one os, one arch, or both.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VariantSpec {
+    /// The OS the variant is for. None fits any OS.
     pub os: Option<String>,
+    /// The architecture the variant is for. None fits any architecture.
     pub arch: Option<String>,
     /// The folder in the package; `variants/<key>` in the target's folder
     /// when None.
     pub path: Option<String>,
+    /// The command `hatchery pack` runs for this variant, with `EGG_OS` and `EGG_ARCH` set as well.
     pub build: Option<String>,
+    /// Properties of the `variant` line that Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
@@ -129,22 +165,26 @@ impl VariantSpec {
         variant_key(self.os.as_deref(), self.arch.as_deref())
     }
 
-    /// The folder, relative to the target's folder unless `path` was given,
-    /// in which case it is relative to the package folder.
+    /// The folder the variant has when it names none: `variants/<key>`,
+    /// relative to the target's folder. [`TargetSpec::variant_dir`] gives
+    /// the folder to use, which `path` can change.
     pub fn default_dir(&self) -> String {
         format!("variants/{}", self.key())
     }
 
+    /// Whether this is the fallback variant, with neither `os` nor `arch`.
     pub fn is_fallback(&self) -> bool {
         self.os.is_none() && self.arch.is_none()
     }
 
+    /// Whether the variant fits a platform. A key that is None fits any value, so the fallback fits every platform. [`select_variant`] prefers a keyed variant.
     pub fn matches(&self, p: &Platform) -> bool {
         self.os.as_ref().is_none_or(|o| *o == p.os)
             && self.arch.as_ref().is_none_or(|a| *a == p.arch)
     }
 }
 
+/// The key of a variant from its values, joined by a dash with the OS first. `default` when both are None.
 pub fn variant_key(os: Option<&str>, arch: Option<&str>) -> String {
     match (os, arch) {
         (None, None) => FALLBACK_KEY.to_string(),
@@ -175,6 +215,7 @@ where
 }
 
 impl TargetSpec {
+    /// A target with only a name. Everything else is empty.
     pub fn new(name: impl Into<String>) -> TargetSpec {
         TargetSpec {
             name: name.into(),
@@ -205,10 +246,12 @@ impl TargetSpec {
         }
     }
 
+    /// The variant with this key, such as `linux-x86_64`. None when the target has none.
     pub fn variant(&self, key: &str) -> Option<&VariantSpec> {
         self.variants.iter().find(|v| v.key() == key)
     }
 
+    /// The variant for a platform: the first keyed variant that fits, else the fallback. None when neither exists.
     pub fn select_variant(&self, p: &Platform) -> Option<&VariantSpec> {
         select_variant(&self.variants, |v| (v.os.as_deref(), v.arch.as_deref()), p)
     }
@@ -217,20 +260,28 @@ impl TargetSpec {
 /// Where an egg was built from. Written by `hatchery pack`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Origin {
+    /// The address of the source repository. The `repository` of `about` when set, else the `origin` remote of the checkout with any user and password removed.
     pub repository: Option<String>,
+    /// The commit `HEAD` was at. None when the folder is not in a git checkout.
     pub commit: Option<String>,
+    /// When the egg was built. It is `SOURCE_DATE_EPOCH` when set, else the commit time of `HEAD`, else the current time.
     pub built: Option<Timestamp>,
     /// The Hatchery version that packed it.
     pub hatchery: Option<String>,
+    /// Nodes of the `origin` section that Hatchery does not know, in file order.
     pub extra: Vec<KdlNode>,
 }
 
 /// Values a repository's `packages.kdl` gives every package.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Defaults {
+    /// The group of packages that name none.
     pub group: Option<String>,
+    /// The version of packages that name none.
     pub version: Option<Version>,
+    /// Nodes of the `package` section that every package gets, unless it has a node of the same name.
     pub package_extra: Vec<KdlNode>,
+    /// The display data packages get for what they leave out. For `license`, `author` and `keywords` the defaults apply only when the package has no such line.
     pub about: About,
 }
 
@@ -587,6 +638,7 @@ impl Manifest {
         Manifest::parse_with(&text, defaults.as_ref()).map_err(|e| prefix(e, &path))
     }
 
+    /// The package's `group/id`.
     pub fn name(&self) -> Name {
         Name {
             group: self.package.group.clone(),
@@ -594,10 +646,12 @@ impl Manifest {
         }
     }
 
+    /// The package's version.
     pub fn version(&self) -> &Version {
         &self.package.version
     }
 
+    /// The target with this name. None when the package has no such target.
     pub fn target(&self, name: &str) -> Option<&TargetSpec> {
         self.targets.iter().find(|t| t.name == name)
     }
@@ -670,6 +724,7 @@ impl Manifest {
     }
 }
 
+/// The file name of a variant egg, `<id>-<version>.<target>.<key>.egg`.
 pub fn variant_egg_name(id: &str, version: &Version, target: &str, key: &str) -> String {
     format!("{id}-{version}.{target}.{key}.egg")
 }

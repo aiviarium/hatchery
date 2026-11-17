@@ -23,18 +23,22 @@ pub fn system_clock() -> Clock {
 }
 
 impl Timestamp {
+    /// The current time of the system clock.
     pub fn now() -> Timestamp {
         Timestamp::from(SystemTime::now())
     }
 
+    /// A time from seconds since the Unix epoch. Negative values are before it.
     pub fn from_secs(secs: i64) -> Timestamp {
         Timestamp(secs)
     }
 
+    /// The seconds since the Unix epoch.
     pub fn secs(self) -> i64 {
         self.0
     }
 
+    /// This time plus the whole seconds of `d`. It stops at the largest value instead of overflowing.
     pub fn plus(self, d: Duration) -> Timestamp {
         Timestamp(self.0.saturating_add(d.as_secs() as i64))
     }

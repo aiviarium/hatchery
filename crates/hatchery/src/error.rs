@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::platform::Platform;
 use crate::time::Timestamp;
 
+/// The result type of this crate. The error is [`Error`] unless another is given.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The package, version and registry an error is about. Any part can be
@@ -24,6 +25,7 @@ pub struct At {
 }
 
 impl At {
+    /// Starts with a package, written as `group/id` or as an id alone. The version and the registry are unset.
     pub fn new(package: impl fmt::Display) -> Self {
         At {
             package: package.to_string(),
@@ -32,11 +34,13 @@ impl At {
         }
     }
 
+    /// Sets the version, or the range that was asked for.
     pub fn version(mut self, version: impl fmt::Display) -> Self {
         self.version = Some(version.to_string());
         self
     }
 
+    /// Sets the label of the registry or source.
     pub fn registry(mut self, registry: impl fmt::Display) -> Self {
         self.registry = Some(registry.to_string());
         self
@@ -56,80 +60,139 @@ impl fmt::Display for At {
     }
 }
 
+/// What can go wrong in this crate. The enum is `non_exhaustive`, so a `match` needs a wildcard arm.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The bytes do not have the checksum the index or the lock file gives.
     #[error("{at}: checksum mismatch, expected sha256 {expected}, got {actual}")]
     ChecksumMismatch {
+        /// The package, version and registry of the egg.
         at: At,
+        /// The SHA-256 the index or the lock file gives, in lowercase hex.
         expected: String,
+        /// The SHA-256 of the bytes that were read, in lowercase hex.
         actual: String,
     },
 
     /// The registry has a key and the egg is not signed by it.
     #[error("{at}: signature not valid: {reason}")]
-    SignatureInvalid { at: At, reason: String },
+    SignatureInvalid {
+        /// The package, version and registry.
+        at: At,
+        /// Why the signature is refused, such as that it is missing or does not verify.
+        reason: String,
+    },
 
     /// A line of a target's `requires` block does not hold.
     #[error("{at}: target {target} requires {fact} {wanted}, {found}", wanted = wanted.join(" "), found = match found { Some(f) => format!("but it is {f}"), None => "which is not present".to_string() })]
     Unmet {
+        /// The package, version and registry.
         at: At,
+        /// The target whose `requires` block does not hold.
         target: String,
+        /// The fact name of the line that fails, such as `os` or `rookery`.
         fact: String,
+        /// The values the line accepts. Empty when the line only asks for the fact to be present.
         wanted: Vec<String>,
+        /// What the tool answered for the fact. None when it has no such fact.
         found: Option<String>,
     },
 
     /// The target declares variants and none is for this platform.
     #[error("{at}: target {target} has no variant for {platform}")]
     NoVariant {
+        /// The package, version and registry.
         at: At,
+        /// The target that declares the variants.
         target: String,
+        /// The platform the target was to be installed for.
         platform: Platform,
     },
 
     /// The version is younger than the registry's minimum release age.
     #[error("{at}: too new to install until {until}")]
-    TooYoung { at: At, until: Timestamp },
+    TooYoung {
+        /// The package, version and registry.
+        at: At,
+        /// When the version becomes installable.
+        until: Timestamp,
+    },
 
     /// The version was pulled by its publisher.
     #[error("{at}: withdrawn{}", reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default())]
-    Withdrawn { at: At, reason: Option<String> },
+    Withdrawn {
+        /// The package, version and registry.
+        at: At,
+        /// The publisher's reason. None when none was given.
+        reason: Option<String>,
+    },
 
     /// A git registry has no built egg for the version, and a wanted target
     /// needs a build.
     #[error("{at}: no built egg, and {} a build", match targets.as_slice() { [t] => format!("target {t} needs"), ts => format!("targets {} need", ts.join(", ")) })]
-    NotBuilt { at: At, targets: Vec<String> },
+    NotBuilt {
+        /// The package, version and registry.
+        at: At,
+        /// The wanted targets that need a build.
+        targets: Vec<String>,
+    },
 
     /// A tag points at a different commit than the lock file records.
     #[error("{at}: tag {tag} moved from {locked} to {now}")]
     TagMoved {
+        /// The package, version and registry.
         at: At,
+        /// The name of the tag.
         tag: String,
+        /// The commit `eggs.lock` records for the tag.
         locked: String,
+        /// The commit the tag points at now.
         now: String,
     },
 
     /// A package cannot be removed while others that depend on it are installed.
     #[error("{at}: required by {}", dependents.join(", "))]
-    RequiredBy { at: At, dependents: Vec<String> },
+    RequiredBy {
+        /// The package that was to be removed.
+        at: At,
+        /// The installed packages that depend on it, as `group/id`.
+        dependents: Vec<String>,
+    },
 
     /// No registry has the package, or no version in the range.
     #[error("{at}: not found")]
-    NotFound { at: At },
+    NotFound {
+        /// The package, with the range that was asked for as its version when there is one.
+        at: At,
+    },
 
     /// An id alone matches packages of several groups.
     #[error("{id} is offered by several groups ({}); name one as group/id", groups.join(", "))]
-    Ambiguous { id: String, groups: Vec<String> },
+    Ambiguous {
+        /// The id that was asked for, without a group.
+        id: String,
+        /// The groups that offer a package with that id.
+        groups: Vec<String>,
+    },
 
     /// Versions were found, but no set of them satisfies every range.
     #[error("{at}: {message}")]
-    Conflict { at: At, message: String },
+    Conflict {
+        /// The package, version and registry the conflict was found for.
+        at: At,
+        /// What does not fit, as a sentence.
+        message: String,
+    },
 
     /// A manifest, configuration, lock file or index is not valid.
     #[error("{what}: {message}")]
-    Invalid { what: String, message: String },
+    Invalid {
+        /// What was being read, such as a file path or a line of a configuration.
+        what: String,
+        /// What is wrong with it.
+        message: String,
+    },
 
     /// An egg holds an entry that unpacking refuses.
     #[error("unsafe archive: {0}")]
@@ -138,34 +201,56 @@ pub enum Error {
     /// A target's own check refused its files.
     #[error("target {target}: {}", problems.iter().map(|p| p.to_string()).collect::<Vec<_>>().join("; "))]
     Check {
+        /// The target whose check refused its files.
         target: String,
+        /// What the check found, one [`Problem`](crate::target::Problem) for each.
         problems: Vec<crate::target::Problem>,
     },
 
     /// A build command failed.
     #[error("build command {command:?} failed: {message}")]
-    Build { command: String, message: String },
+    Build {
+        /// The command that was run.
+        command: String,
+        /// Why it failed, such as its exit status.
+        message: String,
+    },
 
     /// The git command failed.
     #[error("git {args}: {message}")]
-    Git { args: String, message: String },
+    Git {
+        /// The arguments git was given, with any password in an address removed.
+        args: String,
+        /// What git printed, or why it could not be run.
+        message: String,
+    },
 
     /// A fetch over the network failed.
     #[error("{url}: {message}")]
-    Http { url: String, message: String },
+    Http {
+        /// The address that was fetched.
+        url: String,
+        /// Why the fetch failed, such as a status code or a network error.
+        message: String,
+    },
 
+    /// An I/O error, with the path it was about.
     #[error("{}: {source}", path.display())]
     Io {
+        /// The file or folder the operation was on.
         path: PathBuf,
+        /// The error the operating system gave.
         #[source]
         source: std::io::Error,
     },
 
+    /// An error that fits no other variant. The text is a sentence for people.
     #[error("{0}")]
     Other(String),
 }
 
 impl Error {
+    /// An [`Error::Invalid`]. `what` names the thing that was read, and `message` says what is wrong with it.
     pub fn invalid(what: impl fmt::Display, message: impl fmt::Display) -> Self {
         Error::Invalid {
             what: what.to_string(),
@@ -173,6 +258,7 @@ impl Error {
         }
     }
 
+    /// An [`Error::Other`] with this text.
     pub fn other(message: impl fmt::Display) -> Self {
         Error::Other(message.to_string())
     }

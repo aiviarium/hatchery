@@ -24,6 +24,7 @@ const LOCK_STALE: Duration = Duration::from_secs(30 * 60);
 /// How to run git.
 #[derive(Debug, Clone)]
 pub struct Git {
+    /// The program to run, a path or a name found on `PATH`. `git` by default.
     pub program: PathBuf,
 }
 
@@ -57,6 +58,7 @@ impl Remote {
 }
 
 impl Git {
+    /// The same as [`Git::default`]. It runs `git` from `PATH`.
     pub fn new() -> Git {
         Git::default()
     }
@@ -372,6 +374,7 @@ pub struct RepoCache {
 }
 
 impl RepoCache {
+    /// The cache folder of the repository's checkout.
     pub fn dir(&self) -> &Path {
         &self.dir
     }

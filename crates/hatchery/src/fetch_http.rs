@@ -15,6 +15,7 @@ pub struct HttpFetch {
 }
 
 impl HttpFetch {
+    /// A fetcher with ureq's default settings. A body over 512 MiB is an error.
     pub fn new() -> HttpFetch {
         HttpFetch {
             agent: ureq::Agent::new_with_defaults(),

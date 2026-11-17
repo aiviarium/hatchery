@@ -16,8 +16,10 @@ use crate::time::Timestamp;
 /// `<base>/index.json`: the packages the registry has.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Catalog {
+    /// The packages of the registry, sorted when added with [`Catalog::add`].
     #[serde(default)]
     pub packages: Vec<Name>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -37,17 +39,23 @@ impl Catalog {
 /// `<base>/<group>/<id>/index.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackageIndex {
+    /// The package's group.
     pub group: String,
+    /// The package's id.
     pub id: String,
+    /// The display data of the package, from the egg published last.
     #[serde(default)]
     pub about: IndexAbout,
+    /// Every version of the package that has an entry, by its version text such as `1.4.0`.
     #[serde(default)]
     pub versions: BTreeMap<String, IndexVersion>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl PackageIndex {
+    /// An index for a package with no display data and no versions.
     pub fn new(name: &Name) -> PackageIndex {
         PackageIndex {
             group: name.group.clone(),
@@ -58,6 +66,7 @@ impl PackageIndex {
         }
     }
 
+    /// The package's name from `group` and `id`. Fails with [`Error::Invalid`] when either is not a valid name.
     pub fn name(&self) -> Result<Name> {
         Name::new(&self.group, &self.id)
     }
@@ -94,23 +103,31 @@ impl PackageIndex {
 /// What the index says about a package, for display.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IndexAbout {
+    /// A display name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// One sentence about the package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     /// The file name of the icon copy beside the index.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// SPDX identifiers. The package may be used under any one of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub licenses: Vec<String>,
+    /// The authors, one entry each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<String>,
+    /// The address of the project's home page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
+    /// The address of the source repository.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    /// Words to find the package by.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keywords: Vec<String>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -132,6 +149,7 @@ impl IndexAbout {
         }
     }
 
+    /// The [`About`] this index data stands for. The icon stays a file name, not a path in the package folder.
     pub fn to_about(&self) -> About {
         About {
             name: self.name.clone(),
@@ -158,14 +176,19 @@ pub struct IndexVersion {
     /// The base egg's checksum. None until the base egg is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// The base egg's Ed25519 signature in lowercase hex. None for an unsigned egg, and until the base egg is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// When the base egg was published. None until it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<Timestamp>,
+    /// Set when the version is withdrawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawn: Option<IndexWithdrawn>,
+    /// What the version says about each target, by the target's name.
     #[serde(default)]
     pub targets: BTreeMap<String, IndexTarget>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -193,10 +216,13 @@ impl IndexVersion {
     }
 }
 
+/// The `withdrawn` entry of a version, which marks it as not to be installed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexWithdrawn {
+    /// Why the version was withdrawn. None when no reason was given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -206,8 +232,11 @@ pub struct IndexWithdrawn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IndexRequirement {
+    /// A single value, as a string.
     One(String),
+    /// Several values, as an array.
     Many(Vec<String>),
+    /// No value, written as `true`. The fact only has to be present.
     Flag(bool),
 }
 
@@ -232,20 +261,26 @@ impl IndexRequirement {
 /// What a version says about one target.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IndexTarget {
+    /// Whether the target, or one of its variants, has a build command.
     #[serde(default, skip_serializing_if = "is_false")]
     pub build: bool,
+    /// The target's `requires` lines, by fact name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub requires: BTreeMap<String, IndexRequirement>,
+    /// The packages the target needs, by `group/id`, each with its range as text.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, String>,
+    /// The packages the target can use, in the same form as `dependencies`.
     #[serde(
         default,
         rename = "optional-dependencies",
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub optional_dependencies: BTreeMap<String, String>,
+    /// The variants the target declares, with their eggs once published.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<IndexVariant>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -255,6 +290,7 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl IndexTarget {
+    /// The entry for what a source knows of a target.
     pub fn from_info(t: &TargetInfo) -> IndexTarget {
         let deps = |ds: &[(Name, semver::VersionReq)]| {
             ds.iter()
@@ -312,21 +348,28 @@ impl IndexTarget {
 /// One variant of a target, with its egg's checksum once published.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IndexVariant {
+    /// The OS of the variant. None when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os: Option<String>,
+    /// The architecture of the variant. None when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arch: Option<String>,
+    /// The variant egg's checksum. None until the variant egg is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// The variant egg's signature in lowercase hex. None for an unsigned egg.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// When the variant egg was published. None until it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<Timestamp>,
+    /// Keys this crate does not know. They are kept when the file is written again.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl IndexVariant {
+    /// The entry for what a source knows of a variant.
     pub fn from_info(v: &VariantInfo) -> IndexVariant {
         IndexVariant {
             os: v.os.clone(),
@@ -338,6 +381,7 @@ impl IndexVariant {
         }
     }
 
+    /// What the source knows of the variant, without the keys this crate does not know.
     pub fn to_info(&self) -> VariantInfo {
         VariantInfo {
             os: self.os.clone(),
@@ -348,6 +392,7 @@ impl IndexVariant {
         }
     }
 
+    /// The variant's key, its values joined by a dash, such as `linux-x86_64`. `default` when it has neither.
     pub fn key(&self) -> String {
         variant_key(self.os.as_deref(), self.arch.as_deref())
     }

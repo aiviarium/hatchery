@@ -34,6 +34,7 @@ struct Resolved {
 }
 
 impl GitFolder {
+    /// One package folder of the repository at `url`. `path` is the folder in the repository, the root when None, and `git_ref` is a tag, branch or commit, the default branch when None. `cache` is the folder for cached checkouts. Nothing is read until the source is used.
     pub fn new(
         url: impl Into<String>,
         path: Option<String>,

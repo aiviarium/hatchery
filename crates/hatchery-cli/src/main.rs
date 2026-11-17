@@ -49,6 +49,7 @@ impl From<serde_json::Error> for Fail {
     }
 }
 
+/// The result of a command. The error is a message for the person running it, and `main` prints it after `error:`.
 pub type Res<T = ()> = Result<T, Fail>;
 
 /// Adds the path to an I/O error.

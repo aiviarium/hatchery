@@ -27,15 +27,23 @@ use crate::time::Timestamp;
 pub enum Origin {
     /// A registry, static or git, found by its label.
     Registry,
+    /// One folder of a git repository at one ref, from [`Spec::Git`](crate::Spec::Git).
     Git {
+        /// The address of the repository, as it was given.
         url: String,
+        /// The package's folder in the repository. None means the root.
         path: Option<String>,
+        /// The tag, branch or commit. None means the default branch.
         git_ref: Option<String>,
     },
+    /// An egg file or the address of one, from [`Spec::File`](crate::Spec::File).
     File {
+        /// The path or address, as it was given.
         location: String,
     },
+    /// A package folder on disk, from [`Spec::Folder`](crate::Spec::Folder).
     Folder {
+        /// The absolute path of the folder when it could be made absolute, else the path as it was given.
         path: String,
     },
 }
@@ -43,7 +51,9 @@ pub enum Origin {
 /// One source the resolver may use.
 #[derive(Clone)]
 pub struct SourceEntry {
+    /// The source packages are read from.
     pub source: Arc<dyn Source>,
+    /// How the lock file records packages that come from this source.
     pub origin: Origin,
     /// The groups it may serve; any when empty.
     pub only: Vec<String>,
@@ -73,10 +83,12 @@ impl SourceEntry {
         }
     }
 
+    /// Whether this is a registry, which is searched and held to the minimum release age, rather than the source of one chosen package.
     pub fn is_registry(&self) -> bool {
         self.origin == Origin::Registry
     }
 
+    /// Whether the source may serve a group. Any group is served when `only` is empty.
     pub fn serves(&self, group: &str) -> bool {
         self.only.is_empty() || self.only.iter().any(|g| g == group)
     }
@@ -85,6 +97,7 @@ impl SourceEntry {
 /// What the resolver needs to know of an installed package.
 #[derive(Debug, Clone)]
 pub struct InstalledPkg {
+    /// The installed version.
     pub version: Version,
     /// What its installed targets require.
     pub dependencies: Vec<(Name, VersionReq)>,
@@ -95,7 +108,9 @@ pub struct InstalledPkg {
 pub struct Pick {
     /// The index of its source.
     pub source: usize,
+    /// The offered version that was chosen.
     pub offer: Offer,
+    /// The details of that version, with its targets.
     pub details: Details,
     /// The targets of the client the package has, which are installed.
     pub targets: Vec<String>,
@@ -132,6 +147,7 @@ struct State {
     details: BTreeMap<(usize, Name, Version), Details>,
 }
 
+/// Chooses a version of every package a request needs, from the sources it is given. It reads indexes and manifests and never downloads an egg. [`Client`](crate::Client) uses it for `add`, `update` and `install`.
 pub struct Resolver {
     sources: Vec<SourceEntry>,
     targets: Vec<Arc<dyn Target>>,
@@ -192,6 +208,7 @@ impl Resolver {
         }
     }
 
+    /// Says what is installed. An installed version that satisfies the ranges is kept, and the ranges of its dependencies hold the result back.
     pub fn set_installed(&mut self, installed: BTreeMap<Name, InstalledPkg>) {
         self.installed = installed;
     }
@@ -218,10 +235,12 @@ impl Resolver {
         self.allow_young.insert(name);
     }
 
+    /// The source with this index. Panics when the index is out of range. Indexes come from [`Resolver::add_source`], [`Pick::source`] and the order of the sources given to [`Resolver::new`].
     pub fn source(&self, idx: usize) -> &SourceEntry {
         &self.sources[idx]
     }
 
+    /// The time the minimum release age counts to, as it was given to [`Resolver::new`].
     pub fn now(&self) -> Timestamp {
         self.now
     }

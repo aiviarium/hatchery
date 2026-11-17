@@ -35,11 +35,15 @@ pub type SourceFactory =
 /// What a [`SourceFactory`] may use.
 #[derive(Clone)]
 pub struct SourceContext {
+    /// The [`Fetch`] the client was built with. None when it has none, so an `http` registry cannot be read.
     pub fetch: Option<Arc<dyn Fetch>>,
+    /// The folder where git checkouts are cached, as [`ClientBuilder::cache_dir`] set it.
     pub cache_dir: PathBuf,
+    /// The `git` command the client runs.
     pub git: Git,
 }
 
+/// Builds a [`Client`]. Start it with [`Client::builder`].
 #[derive(Default)]
 pub struct ClientBuilder {
     config: Option<Config>,
@@ -74,6 +78,7 @@ fn default_cache_dir() -> PathBuf {
 }
 
 impl ClientBuilder {
+    /// The registries and the default minimum release age. Without it, the client has no registries.
     pub fn config(mut self, config: Config) -> Self {
         self.config = Some(config);
         self
@@ -84,6 +89,7 @@ impl ClientBuilder {
         self.target_arc(Arc::new(target))
     }
 
+    /// The same as [`ClientBuilder::target`], for a target that is already in an `Arc`.
     pub fn target_arc(mut self, target: Arc<dyn Target>) -> Self {
         self.targets.push(target);
         self
@@ -94,6 +100,7 @@ impl ClientBuilder {
         self.fetch_arc(Arc::new(fetch))
     }
 
+    /// The same as [`ClientBuilder::fetch`], for a fetcher that is already in an `Arc`.
     pub fn fetch_arc(mut self, fetch: Arc<dyn Fetch>) -> Self {
         self.fetch = Some(fetch);
         self
@@ -105,11 +112,13 @@ impl ClientBuilder {
         self
     }
 
+    /// The time source, which decides how old a version is. The system clock by default. Tests pass a fixed one.
     pub fn clock(mut self, clock: Clock) -> Self {
         self.clock = Some(clock);
         self
     }
 
+    /// The `git` command to run. Without it, the client runs `git` from `PATH`.
     pub fn git(mut self, git: Git) -> Self {
         self.git = Some(git);
         self
@@ -121,6 +130,7 @@ impl ClientBuilder {
         self
     }
 
+    /// Makes the client. Fails with [`Error::Invalid`] when a registry line has a bad `key` or address, when an `http` registry has no [`Fetch`], or when its kind is not built in and not added with [`ClientBuilder::kind`].
     pub fn build(self) -> Result<Client> {
         let config = self.config.unwrap_or_else(Config::empty);
         let cache_dir = self.cache_dir.unwrap_or_else(default_cache_dir);
@@ -194,6 +204,7 @@ pub struct Options {
 /// What an `add`, `update` or `install` did.
 #[derive(Debug, Clone)]
 pub struct Report {
+    /// The install folder the operation ran in.
     pub dir: PathBuf,
     /// The packages installed or changed, dependencies first.
     pub packages: Vec<Change>,
@@ -204,38 +215,51 @@ pub struct Report {
 /// One package an operation installed.
 #[derive(Debug, Clone)]
 pub struct Change {
+    /// The package that was installed.
     pub name: Name,
+    /// The version that is installed now.
     pub version: Version,
     /// The version that was installed before, if any.
     pub previous: Option<Version>,
+    /// The SHA-256 of the base egg, in lowercase hex, as `eggs.lock` records it.
     pub sha256: String,
     /// The label of the source it came from.
     pub registry: String,
+    /// The egg as the source gave it. It can be a fat egg, and then `sha256` is the checksum of its base egg.
     pub egg: Egg,
 }
 
 /// A package installed in a folder.
 #[derive(Debug, Clone)]
 pub struct Installed {
+    /// The package.
     pub name: Name,
+    /// The installed version, from `eggs.lock`.
     pub version: Version,
+    /// The SHA-256 of the base egg that was installed, from `eggs.lock`.
     pub sha256: String,
+    /// The client's targets that were installed from the package.
     pub targets: Vec<String>,
     /// The package's folder, `<dir>/<group>/<id>`.
     pub dir: PathBuf,
+    /// The package's `package.kdl`, read from its folder.
     pub manifest: Manifest,
+    /// The package's entry in `eggs.lock`.
     pub lock: LockedPackage,
 }
 
 /// A package the registries offer, for listings.
 #[derive(Debug, Clone)]
 pub struct Offered {
+    /// The package, as `group/id`.
     pub name: Name,
+    /// The display data of the newest version. Empty when that version could not be looked up.
     pub about: About,
     /// The registry that serves it: the first that has it.
     pub registry: String,
     /// Newest first.
     pub versions: Vec<OfferedVersion>,
+    /// The version installed in the folder that was asked about, if any.
     pub installed: Option<Version>,
     /// The newest version an update would install, when newer than the
     /// installed one.
@@ -244,11 +268,16 @@ pub struct Offered {
     pub held_until: Option<Timestamp>,
 }
 
+/// One version of an [`Offered`] package.
 #[derive(Debug, Clone)]
 pub struct OfferedVersion {
+    /// The version.
     pub version: Version,
+    /// When the registry says the egg was published. None for a version from a git tag.
     pub published: Option<Timestamp>,
+    /// Set when the publisher withdrew the version.
     pub withdrawn: Option<Withdrawn>,
+    /// When the minimum release age ends, if the version is still held. None when it can be installed now.
     pub held_until: Option<Timestamp>,
     /// Why this version cannot be installed here, if it cannot.
     pub problem: Option<String>,
@@ -257,7 +286,9 @@ pub struct OfferedVersion {
 /// The eggs `fetch` got.
 #[derive(Debug, Clone)]
 pub struct Fetched {
+    /// The base egg.
     pub base: Egg,
+    /// The variant eggs that were fetched. Each one is checked to be a variant of the same package and version.
     pub variants: Vec<Egg>,
 }
 
@@ -267,6 +298,7 @@ struct Registry {
     min_age: Duration,
 }
 
+/// Lists, installs, updates and removes packages for the targets and registries it was built with. Make one with [`Client::builder`].
 pub struct Client {
     targets: Vec<Arc<dyn Target>>,
     fetch: Option<Arc<dyn Fetch>>,
@@ -397,6 +429,7 @@ impl Prepared {
 }
 
 impl Client {
+    /// A [`ClientBuilder`] with nothing set.
     pub fn builder() -> ClientBuilder {
         ClientBuilder::default()
     }
@@ -1194,6 +1227,7 @@ impl Client {
         self.add_with(spec, dir, &Options::default()).await
     }
 
+    /// Like [`Client::add`], with [`Options`] to change how it resolves. Fails with [`Error::Invalid`] when the client has no target.
     pub async fn add_with(&self, spec: &Spec, dir: &Path, opts: &Options) -> Result<Report> {
         self.need_targets()?;
         let _guard = lock_dir(dir)?;
@@ -1400,6 +1434,7 @@ impl Client {
         lock.save(dir)
     }
 
+    /// The packages `eggs.lock` lists in `dir`, each with its manifest. A package whose folder has no `package.kdl` is left out.
     pub fn installed(&self, dir: &Path) -> Result<Vec<Installed>> {
         let lock = Lock::load(dir)?;
         self.read_installed(dir, &lock)

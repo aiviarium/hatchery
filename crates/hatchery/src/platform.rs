@@ -8,11 +8,14 @@ use serde::{Deserialize, Serialize};
 /// `windows`; `x86_64`, `aarch64`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Platform {
+    /// The OS, such as `linux`, `macos` or `windows`.
     pub os: String,
+    /// The architecture, such as `x86_64` or `aarch64`.
     pub arch: String,
 }
 
 impl Platform {
+    /// A platform from an OS and an architecture. The names are not checked.
     pub fn new(os: impl Into<String>, arch: impl Into<String>) -> Platform {
         Platform {
             os: os.into(),

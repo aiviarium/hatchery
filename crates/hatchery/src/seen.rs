@@ -17,11 +17,13 @@ use crate::time::Timestamp;
 
 /// The folder in an install folder that holds Hatchery's own state.
 pub const DIR: &str = ".hatchery";
+/// The name of the records file inside [`DIR`].
 pub const FILE: &str = "seen.toml";
 
 /// What is known about one version in one registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
+    /// When this installation first saw the version in the registry.
     pub first_seen: Timestamp,
     /// Whether it was in the first listing of the package from the
     /// registry. Those versions were there before this installation looked.
@@ -30,6 +32,7 @@ pub struct Record {
 
 type Versions = BTreeMap<String, Record>;
 
+/// The versions this installation has seen in each registry, and when. They are kept in `.hatchery/seen.toml` of the install folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Seen {
     /// Registry label, then package name, then version.
@@ -68,6 +71,7 @@ impl Seen {
         Ok(())
     }
 
+    /// Whether the records changed since they were read or last saved, so that [`Seen::save`] has something to write.
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -100,6 +104,7 @@ impl Seen {
         }
     }
 
+    /// The record of a version in a registry. The registry is named by its label. None when the version was never recorded.
     pub fn get(&self, registry: &str, name: &Name, version: &Version) -> Option<&Record> {
         self.registry
             .get(registry)?

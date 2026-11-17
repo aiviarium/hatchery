@@ -24,8 +24,11 @@ pub enum PublishTo {
     /// A branch of a git repository, in the static registry layout, under
     /// `path` when given. The branch is created when it does not exist.
     Git {
+        /// The repository to push to, as an address or a path that `git` takes.
         url: String,
+        /// The branch that holds the eggs.
         branch: String,
+        /// A folder of the branch that holds the registry. None puts it at the root of the branch.
         path: Option<String>,
     },
 }
@@ -33,12 +36,17 @@ pub enum PublishTo {
 /// What was published.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Published {
+    /// The package the egg belongs to.
     pub name: Name,
+    /// The version of that package.
     pub version: Version,
     /// The egg's file name in the registry.
     pub file: String,
+    /// The SHA-256 of the egg that was published, in lowercase hex. For a variant egg it is the variant egg's own.
     pub sha256: String,
+    /// Whether the index holds a signature for the egg.
     pub signed: bool,
+    /// The publish time written into the index. [`publish`] uses the current time.
     pub published: Timestamp,
 }
 

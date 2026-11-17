@@ -82,16 +82,20 @@ pub trait Source: Send + Sync {
 /// One version a source offers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Offer {
+    /// The package.
     pub name: Name,
+    /// The version.
     pub version: Version,
     /// The label of the source.
     pub registry: String,
     /// When the egg was published, as the signed index says. None for a
     /// version from a git tag.
     pub published: Option<Timestamp>,
+    /// Set when the publisher withdrew the version.
     pub withdrawn: Option<Withdrawn>,
     /// The base egg's checksum, when the source knows it before fetching.
     pub sha256: Option<String>,
+    /// The base egg's signature in lowercase hex, when the source knows it before fetching.
     pub signature: Option<String>,
     /// False for a version installed from source, such as a git tag
     /// without a built egg.
@@ -127,19 +131,24 @@ impl Offer {
     }
 }
 
+/// A version the publisher pulled after releasing it. A withdrawn version is skipped when resolving.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Withdrawn {
+    /// The publisher's reason. None when none was given.
     pub reason: Option<String>,
 }
 
 /// What resolution needs to know about a version, without its files.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Details {
+    /// The display data of the version.
     pub about: About,
+    /// The targets of the version, in manifest order.
     pub targets: Vec<TargetInfo>,
 }
 
 impl Details {
+    /// The details of a version, read from its manifest. The variants have no checksum, signature or publish time, because a manifest holds none.
     pub fn from_manifest(m: &Manifest) -> Details {
         let group = &m.package.group;
         let deps = |ds: &[crate::manifest::Dependency]| {
@@ -174,33 +183,46 @@ impl Details {
         }
     }
 
+    /// The target with this name. None when the version has no such target.
     pub fn target(&self, name: &str) -> Option<&TargetInfo> {
         self.targets.iter().find(|t| t.name == name)
     }
 }
 
+/// What resolution needs to know of one target of a version.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TargetInfo {
+    /// The target's name.
     pub name: String,
     /// Whether the target, or one of its variants, has a build command.
     pub build: bool,
+    /// The target's `requires` lines.
     pub requires: Vec<Requirement>,
+    /// The packages the target depends on, each with its range. The group of a dependency that names none is the package's own.
     pub dependencies: Vec<(Name, VersionReq)>,
+    /// The packages the target may use, in the same form. They are installed when they can be.
     pub optional_dependencies: Vec<(Name, VersionReq)>,
+    /// The variants the target declares. Empty when it has none.
     pub variants: Vec<VariantInfo>,
 }
 
+/// One variant a target declares, with what the source knows of its egg.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantInfo {
+    /// The variant's `os` key. None when it has none.
     pub os: Option<String>,
+    /// The variant's `arch` key. None when it has none.
     pub arch: Option<String>,
     /// The variant egg's checksum and signature, when it is published.
     pub sha256: Option<String>,
+    /// The variant egg's signature, when it is published.
     pub signature: Option<String>,
+    /// When the variant egg was published, when it is published.
     pub published: Option<Timestamp>,
 }
 
 impl VariantInfo {
+    /// The variant's key, its values joined by a dash, such as `linux-x86_64`. `default` when it has neither.
     pub fn key(&self) -> String {
         variant_key(self.os.as_deref(), self.arch.as_deref())
     }
@@ -212,6 +234,7 @@ pub trait RegistryFiles: Send + Sync {
     /// The registry's address, for messages.
     fn label(&self) -> &str;
 
+    /// Whether the files are on this machine. It is false unless the implementation says otherwise, and true sets the default minimum release age to none.
     fn is_local(&self) -> bool {
         false
     }

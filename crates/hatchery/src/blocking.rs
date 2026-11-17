@@ -20,6 +20,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Wraps an async [`crate::Client`].
     pub fn new(inner: crate::Client) -> Client {
         Client { inner }
     }
@@ -29,38 +30,47 @@ impl Client {
         &self.inner
     }
 
+    /// See [`crate::Client::offered`].
     pub fn offered(&self, dir: &Path) -> Result<Vec<Offered>> {
         block_on(self.inner.offered(dir))
     }
 
+    /// See [`crate::Client::add`].
     pub fn add(&self, spec: &Spec, dir: &Path) -> Result<Report> {
         block_on(self.inner.add(spec, dir))
     }
 
+    /// See [`crate::Client::add_with`].
     pub fn add_with(&self, spec: &Spec, dir: &Path, opts: &Options) -> Result<Report> {
         block_on(self.inner.add_with(spec, dir, opts))
     }
 
+    /// See [`crate::Client::update`]. `None` updates every installed package.
     pub fn update(&self, name: Option<&Name>, dir: &Path) -> Result<Report> {
         block_on(self.inner.update(name, dir))
     }
 
+    /// See [`crate::Client::install`].
     pub fn install(&self, dir: &Path) -> Result<Report> {
         block_on(self.inner.install(dir))
     }
 
+    /// See [`crate::Client::remove`]. This one never waits, so it does not use the executor.
     pub fn remove(&self, name: &Name, dir: &Path) -> Result<()> {
         self.inner.remove(name, dir)
     }
 
+    /// See [`crate::Client::installed`]. This one never waits, so it does not use the executor.
     pub fn installed(&self, dir: &Path) -> Result<Vec<Installed>> {
         self.inner.installed(dir)
     }
 
+    /// See [`crate::Client::variant`].
     pub fn variant(&self, pkg: &Installed, platform: &Platform) -> Result<PathBuf> {
         block_on(self.inner.variant(pkg, platform))
     }
 
+    /// See [`crate::Client::fetch`].
     pub fn fetch(
         &self,
         spec: &Spec,

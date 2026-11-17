@@ -152,6 +152,7 @@ pub struct FileSource {
 }
 
 impl FileSource {
+    /// The egg at `location`, a path or an `http://` or `https://` address. `fetch` is only needed for an address, and without it reading one fails.
     pub fn new(location: impl Into<String>, fetch: Option<Arc<dyn Fetch>>) -> FileSource {
         FileSource {
             location: location.into(),

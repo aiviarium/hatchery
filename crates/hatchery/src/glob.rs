@@ -1,12 +1,14 @@
 //! Glob patterns over `/`-separated relative paths: `*` and `?` within one
 //! segment, `**` for any number of segments.
 
+/// A pattern split into its `/`-separated segments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Glob {
     segments: Vec<String>,
 }
 
 impl Glob {
+    /// Reads a pattern. A leading `./` and trailing `/` are dropped. Any text is a valid pattern.
     pub fn new(pattern: &str) -> Glob {
         let p = pattern
             .strip_prefix("./")

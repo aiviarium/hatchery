@@ -25,14 +25,20 @@ pub const VARIANTS_DIR: &str = "variants";
 /// What a variant egg says it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantHeader {
+    /// The package the variant egg belongs to.
     pub name: Name,
+    /// The version of that package.
     pub version: Version,
+    /// The target the variant is for.
     pub target: String,
+    /// The OS key of the variant. None when the variant has no `os`.
     pub os: Option<String>,
+    /// The architecture key of the variant. None when the variant has no `arch`.
     pub arch: Option<String>,
 }
 
 impl VariantHeader {
+    /// The variant's key, its values joined by a dash, such as `linux-x86_64`. `default` when it has neither.
     pub fn key(&self) -> String {
         crate::manifest::variant_key(self.os.as_deref(), self.arch.as_deref())
     }
@@ -126,7 +132,9 @@ impl VariantHeader {
 pub struct Entry {
     /// `/`-separated, relative.
     pub path: String,
+    /// The file's contents.
     pub data: Bytes,
+    /// Whether the file is executable. It is written as mode 0755, and as 0644 otherwise.
     pub executable: bool,
 }
 
@@ -180,7 +188,7 @@ fn is_variant_entry(path: &str) -> bool {
 
 impl Egg {
     /// Packs a folder into a base egg without running any build, checking
-    /// each target with the given tools. See [`crate::pack`] for the rest.
+    /// each target with the given tools. See [`mod@crate::pack`] for the rest.
     pub fn pack(dir: &Path, targets: &[&dyn Target]) -> Result<Egg> {
         let opts = crate::pack::PackOptions {
             base: true,
@@ -322,6 +330,7 @@ impl Egg {
         matches!(self.kind, Kind::Fat(_))
     }
 
+    /// Every file of the archive, sorted by path. A fat egg's variant eggs are among them, under `variants/`.
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }
@@ -402,6 +411,7 @@ impl Egg {
         &self.sha256
     }
 
+    /// The archive, gzipped, as it is stored and as its checksum is computed.
     pub fn bytes(&self) -> &Bytes {
         &self.bytes
     }

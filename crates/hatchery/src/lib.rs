@@ -9,6 +9,8 @@
 // Errors carry the package, version and registry so tools can show them;
 // they are not on a hot path, so their size does not matter.
 #![allow(clippy::result_large_err)]
+// A library reports through its return values. Printing is the caller's.
+#![warn(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod archive;
 #[cfg(feature = "blocking")]

@@ -17,8 +17,11 @@ use crate::time::Timestamp;
 /// One variant to pack: a target and the os/arch values that pick it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantPick {
+    /// The target the variant belongs to.
     pub target: String,
+    /// The `os` key of the variant to pick. None picks a variant with no `os`.
     pub os: Option<String>,
+    /// The `arch` key of the variant to pick. None picks a variant with no `arch`.
     pub arch: Option<String>,
 }
 
