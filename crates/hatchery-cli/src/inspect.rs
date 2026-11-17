@@ -58,7 +58,7 @@ fn to_text(egg: &Egg) -> String {
     let m = egg.manifest();
     let group = &m.package.group;
     let mut s = format!("{} {} ({} egg)\n", m.name(), m.package.version, kind(egg));
-    let mut line = |k: &str, v: &str| s.push_str(&format!("  {k:<10}{v}\n"));
+    let mut line = |k: &str, v: &str| s.push_str(&format!("  {k:<12}{v}\n"));
     if let Some(h) = egg.variant() {
         line("variant", &format!("{} {}", h.target, h.key()));
     }
