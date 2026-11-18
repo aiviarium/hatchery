@@ -24,7 +24,7 @@ ln -s "$bin/hatchery" "$dir/bin/hatchery"
 # The playground's own configuration, cache and git identity.
 export PATH="$dir/bin:$PATH"
 export HATCHERY_CONFIG="$dir/hatchery.kdl"
-export XDG_CACHE_HOME="$dir/cache"
+export HATCHERY_CACHE="$dir/cache"
 export GIT_CONFIG_GLOBAL="$dir/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 git config --global user.name playground
@@ -78,7 +78,7 @@ cat > "$dir/env.sh" <<EOF
 # Source this file: . $dir/env.sh
 export PATH="$dir/bin:\$PATH"
 export HATCHERY_CONFIG="$dir/hatchery.kdl"
-export XDG_CACHE_HOME="$dir/cache"
+export HATCHERY_CACHE="$dir/cache"
 export GIT_CONFIG_GLOBAL="$dir/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 export HATCHERY_SIGN_KEY="\$(cat "$dir/sign.key")"

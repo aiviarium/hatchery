@@ -116,7 +116,7 @@ Built with `Client::builder()`:
 | `config(Config)` | The registries and the default minimum release age |
 | `target(impl Target)`, `target_arc` | A tool this client installs for. Call it once per target |
 | `fetch(impl Fetch)`, `fetch_arc` | How HTTP registries and egg addresses are fetched. Without one, they fail |
-| `cache_dir(path)` | Where git checkouts are cached. The user's cache folder by default |
+| `cache_dir(path)` | Where git checkouts are cached. `$HATCHERY_CACHE` by default, or `hatchery` in the user's cache folder when it is not set |
 | `clock(Clock)` | The time source, for tests |
 | `git(Git)` | The `git` program to run |
 | `kind(name, factory)` | Registry lines of this node name |

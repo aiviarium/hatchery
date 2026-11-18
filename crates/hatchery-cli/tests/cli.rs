@@ -109,7 +109,7 @@ impl Env {
         cmd.args(args)
             .current_dir(self.tmp.path())
             .env("HATCHERY_CONFIG", self.path("config/hatchery.kdl"))
-            .env("XDG_CACHE_HOME", self.path("cache"))
+            .env("HATCHERY_CACHE", self.path("cache"))
             .env("XDG_CONFIG_HOME", self.path("xdg-config"))
             .env("HOME", self.path("home"))
             .env("SOURCE_DATE_EPOCH", "1767225600")

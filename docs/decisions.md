@@ -117,7 +117,7 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - A tag pattern without `{id}` is shared. A shared tag counts for a package only when the package's manifest at that commit has the tag's version. Listing such a package fetches each of its candidate tags once.
 - A package folder whose `package.kdl` on the default branch does not parse is skipped, and the source reports it through `Source::warnings`. Asking for a package whose folder has that name gives the parse error.
 - Registry addresses in `eggs.lock`, in `.hatchery/seen.toml`, in an egg's `origin`, in listings and in error messages have their user and password removed. Only git itself is given the address as configured.
-- The git cache is `$XDG_CACHE_HOME/hatchery/git` (or `~/.cache/hatchery/git`), one folder per repository, used by one process at a time.
+- The git cache is `$HATCHERY_CACHE/git`, or without that variable `$XDG_CACHE_HOME/hatchery/git` (or `~/.cache/hatchery/git`), one folder per repository, used by one process at a time.
 
 ## Static registries
 

@@ -66,14 +66,17 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
-/// `$XDG_CACHE_HOME/hatchery`, else `~/.cache/hatchery`; on Windows
-/// `%LOCALAPPDATA%\hatchery`.
+/// `$HATCHERY_CACHE`, else `$XDG_CACHE_HOME/hatchery`, else
+/// `~/.cache/hatchery`; on Windows `%LOCALAPPDATA%\hatchery`.
 fn default_cache_dir() -> PathBuf {
     let var = |k: &str| {
         std::env::var_os(k)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
+    if let Some(c) = var("HATCHERY_CACHE") {
+        return c;
+    }
     if let Some(x) = var("XDG_CACHE_HOME") {
         return x.join("hatchery");
     }

@@ -55,7 +55,7 @@ A duration is a number and a unit: `s`, `m`, `h`, `d` or `w`. `0` is also accept
 
 ## Secrets
 
-The file has no secrets in it. `token-env` names a variable, and signing keys are passed the same way. Hatchery reads environment variables for secret values and for `HATCHERY_CONFIG`, and for no other setting.
+The file has no secrets in it. `token-env` names a variable, and signing keys are passed the same way. Apart from secret values, Hatchery reads two environment variables, `HATCHERY_CONFIG` and `HATCHERY_CACHE`. `HATCHERY_CACHE` names the folder that caches git repositories. Without it, the cache is `hatchery` in the user's cache folder.
 
 ## Editing
 
