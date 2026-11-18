@@ -1,5 +1,5 @@
 {
-  "name": "hatchery-docs",
+  "name": "@aiviarium/hatchery-docs",
   "version": "0.0.0",
   "private": true,
   "type": "module",
