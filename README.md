@@ -1,8 +1,4 @@
-<h1><a href="https://github.com/aiviarium/hatchery"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery.svg"><img src="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery-light.svg" alt="Hatchery" height="56"></picture></a></h1>
-
-[![Aiviarium Hatchery](https://aiviarium-badges.helight.workers.dev/aiviarium/badge/Aiviarium-Hatchery-x?tone=hatchery)](https://github.com/aiviarium)
-[![CI](https://aiviarium-badges.helight.workers.dev/hatchery/github/actions/workflow/status/aiviarium/hatchery/ci.yml?branch=main&label=CI)](https://github.com/aiviarium/hatchery/actions/workflows/ci.yml)
-[![License](https://aiviarium-badges.helight.workers.dev/hatchery/github/license/aiviarium/hatchery)](#license)
+<h1><a href="https://github.com/aiviarium/hatchery"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery.svg"><img src="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery-light.svg" alt="Hatchery" height="56"></picture></a><br><a href="https://github.com/aiviarium/hatchery/actions/workflows/ci.yml"><img src="https://aiviarium-badges.helight.workers.dev/hatchery/github/actions/workflow/status/aiviarium/hatchery/ci.yml?branch=main&label=CI" alt="CI"></a> <a href="#license"><img src="https://aiviarium-badges.helight.workers.dev/hatchery/github/license/aiviarium/hatchery" alt="License"></a></h1>
 
 Packaging and distribution for plugins and modular software.
 
