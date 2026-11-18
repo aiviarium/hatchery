@@ -10,5 +10,5 @@ Issue: #
 
 - [ ] `cargo fmt --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --workspace --all-features` pass
 - [ ] Documentation under `docs/` is updated and Vale doesn't report warnings
-- [ ] A change to a file format or to the index says so in `docs/decisions.md` or the page of that format
+- [ ] A change to a file format or to the index says so on the page of that format
 - [ ] I read every line of this change myself

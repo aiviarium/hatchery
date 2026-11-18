@@ -4,7 +4,7 @@
 
 An egg is a built package. It is a gzipped tar named `<id>-<version>.egg` with the manifest, the files the manifest points at and each target's files.
 
-Hatchery writes eggs the same way every time. Entries are sorted, timestamps and owners are fixed, and the gzip header is fixed. The same input gives the same SHA-256.
+Hatchery writes eggs the same way every time. The same input gives the same SHA-256.
 
 Eggs come in three kinds:
 
@@ -16,7 +16,7 @@ Eggs come in three kinds:
 
 Hatchery reads all three everywhere. Removing the variant eggs from a fat egg gives the base egg back, byte for byte.
 
-Unpacking refuses `..`, absolute paths, symlinks and hardlinks. It also refuses a `.git` folder, and the names Windows treats as `.git`. It refuses names Windows cannot hold, such as `con`, `nul.txt`, `a:b` or a name that ends in a dot or a space. It refuses two paths that differ only by case. `hatchery pack` refuses the same names.
+Unpacking refuses paths that could escape the install folder or clash on another system, such as `..`, symlinks, a `.git` folder or names Windows cannot hold. [Eggs](egg.md) has the layout of each kind and the full list of refused names.
 
 ## Targets
 
@@ -64,7 +64,7 @@ Ranges use Cargo's syntax. `"1.2"` means `^1.2`.
 
 A variant is a folder laid over a target's own files for one OS, one architecture, or both. Those are the only two keys.
 
-- A variant's folder is `variants/<key>` in the target's folder. The key is its values joined by a dash: `x86_64`, `linux`, `linux-x86_64`.
+- A variant's folder is `variants/<key>` in the target's folder. The key is its values joined by a dash, `os` first: `x86_64`, `linux`, `linux-x86_64`.
 - The first variant listed that matches is used.
 - A variant with neither key is the fallback. Its key is `default`. It is used only when no keyed variant matches, wherever it is listed.
 - If variants are declared and none matches, the install fails with `NoVariant`.
@@ -101,13 +101,29 @@ A new version is not installed until it has been public for a set time. Most mal
 
 - The setting is per registry, with a `default` line for the rest. Without either, a registry read over the network is held for 3 days. A local folder is not held.
 - For built eggs, `hatchery publish` writes `published` into the index, and the signature covers it.
-- Only a registry with a `key` has its publish times trusted. Without a key, anyone who can write the index can backdate a version. The age then counts from when this installation first saw the version.
+- Only a registry with a `key` has its publish times trusted. Without a key, anyone who can write the index can backdate a version. The age then counts from when this installation first saw the version, for every version, even in the first listing.
 - With a key, the versions of the first listing in a new install folder count from their signed `published` time. That rests on the publisher's clock: a publisher whose key signs an old time skips the hold in a fresh folder.
 - A tag's date is set by its author. For tags, the age counts from when this installation first saw the tag.
 - Hatchery remembers which versions it has seen in each registry. A version that shows up later with an old publish time counts from when it was first seen.
 - The resolver skips versions that are too young, for the package you asked for and for every dependency. If an older version fits the range, it installs that one. If none does, it fails with `TooYoung` and the time the version becomes installable.
-- `--allow-young` overrides the hold.
+- `--allow-young` overrides the hold for the package you name, not for its dependencies.
+- A version that is already installed is never held back.
 - Installs from `eggs.lock` are not held, since the checksum or commit pins them. Folders and files are not held either.
+
+## Resolving and installing
+
+Hatchery installs the newest version in the range that can be installed here, and the newest version of each dependency that fits.
+
+- A version that cannot be installed here is skipped, and Hatchery tries the next older one. The reasons are a withdrawal, the minimum release age, an unmet requirement, no matching variant, or a build that was not published.
+- When no version is left, the error is the reason of the newest version in range: `Withdrawn`, `TooYoung`, `Unmet`, `NoVariant` or `NotBuilt`.
+- A failure to read a version, such as a network or git error, stops the resolution. Hatchery does not fall back to an older version because a registry could not be reached.
+- When `add` installs an older version than the newest in range, it warns and gives the reason.
+- A version that is withdrawn after it was installed is kept. `update` and `list` warn about it, and `update` still moves to a newer allowed version.
+- `add` with the version that is already installed doesn't change or fetch anything.
+- Updating a package replaces its folder. Variants that were fetched on demand are fetched again when they are needed.
+- After fetching an egg, Hatchery checks that its dependencies are the ones in the index it resolved from. The signature covers only the egg, so an index that differs from its egg is an error.
+- `install` checks each egg against the SHA-256 in `eggs.lock`. A package installed from a folder is packed again, and its new SHA-256 is recorded.
+- A client holds a lock on `<dir>/.hatchery/lock` while it changes the install folder, so a second run on the same folder waits for it, up to a minute.
 
 ## Trust
 
@@ -124,12 +140,3 @@ A registry with a key refuses an unsigned egg. A git registry with a key also re
 
 - The index metadata is not signed as a whole, and it has no freshness date. A signature covers one egg. A mirror or anyone who can write the registry can serve an older index, which rolls back to older versions or clears a withdrawal. It cannot change an egg without the key.
 - A fat egg contains the bytes of its variant eggs, not those of its base egg. Its base checksum is that of the base egg Hatchery writes again from the fat egg's entries. That depends on the gzip code that compresses it. A build that switches the backend of `flate2` changes the base checksum of every fat egg, and `install` from an older lock then fails with `ChecksumMismatch`.
-
-## What Hatchery leaves out
-
-- No task graph, cache or incremental build. The build command is a script you own.
-- No scripts at install.
-- No package-level features and no condition expressions.
-- No conflicts or replaces.
-- No permissions list. A target declares what it may do in the tool's own manifest.
-- No translated display text. `about` is in one language.

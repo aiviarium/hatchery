@@ -50,7 +50,9 @@ Keys that do not apply are left out, and packages are sorted by name. When Hatch
 <dir>/.hatchery/unpacked.toml                the checksum of the base egg each package folder was unpacked from
 ```
 
-`seen.toml` backs the minimum release age. Keep it with the install folder. It has `format = 1` too, and keeps keys it does not know. `unpacked.toml` tells `install` what each folder contains. Without it, `install` unpacks every package again.
+An install folder refuses a package whose group, or whose id within one group, differs from another only by case, because Windows and macOS would put both in one folder.
+
+`seen.toml` backs the minimum release age. Keep it with the install folder. It and `unpacked.toml` have `format = 1` too, and keep keys they do not know. `unpacked.toml` tells `install` what each folder contains. Without it, `install` unpacks every package again.
 
 `hatchery list` shows the version in each package's own `package.kdl`, which is what is installed. It can differ from the lock until `install` runs.
 

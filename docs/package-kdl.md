@@ -141,20 +141,8 @@ A variant with neither key is the fallback, with key `default`. Each key may be 
 
 ## Unknown nodes
 
-Hatchery keeps nodes it does not know when it writes a manifest again. A tool can add metadata to a package without a Hatchery release.
+Hatchery keeps nodes it does not know when it writes a manifest again. So a tool can add its own metadata to a package.
 
 ## What `pack` writes into the egg
 
-- A complete manifest. Values inherited from the repository's `packages.kdl` are written out, so the egg's `package.kdl` is complete. Target and variant `path=` properties are removed, because inside the egg each target's files are at the default folder.
-- An `origin` section, which nobody writes by hand:
-
-```kdl
-origin {
-  repository "https://github.com/aiviarium/parrot"
-  commit "4be1c0d…"
-  built "2026-11-10T09:00:00Z"
-  hatchery "0.1.0"
-}
-```
-
-`origin` answers "what source is this egg" after the fact. `built` is `SOURCE_DATE_EPOCH` if set, else the commit time of `HEAD` when the folder is in a git checkout, else it is left out. Packing the same folder twice gives the same egg.
+The egg contains a complete copy of the manifest. Values inherited from `packages.kdl` are written out, `path=` properties are removed, and an `origin` section records where the egg came from. See [Eggs](egg.md#base-egg).
