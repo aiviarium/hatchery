@@ -123,7 +123,7 @@ A registry with a key refuses an unsigned egg. A git registry with a key also re
 ## Known limits
 
 - The index metadata is not signed as a whole, and it has no freshness date. A signature covers one egg. A mirror or anyone who can write the registry can serve an older index, which rolls back to older versions or clears a withdrawal. It cannot change an egg without the key.
-- A fat egg contains the bytes of its variant eggs, not those of its base egg. Its base checksum is that of the base egg Hatchery writes again from the fat egg's entries. That depends on the gzip code that compresses it. A build that switches the backend of flate2 changes the base checksum of every fat egg, and `install` from an older lock then fails with `ChecksumMismatch`.
+- A fat egg contains the bytes of its variant eggs, not those of its base egg. Its base checksum is that of the base egg Hatchery writes again from the fat egg's entries. That depends on the gzip code that compresses it. A build that switches the backend of `flate2` changes the base checksum of every fat egg, and `install` from an older lock then fails with `ChecksumMismatch`.
 
 ## What Hatchery leaves out
 

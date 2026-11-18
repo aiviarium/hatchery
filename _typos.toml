@@ -8,3 +8,7 @@ extend-ignore-re = [
   # Hex strings: checksums, keys and commits.
   "\\b[0-9a-f]{12,}\\b",
 ]
+
+[default.extend-identifiers]
+# The gzip crate.
+flate2 = "flate2"
