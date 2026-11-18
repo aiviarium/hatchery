@@ -1,8 +1,14 @@
-# Hatchery
+<h1><a href="https://github.com/aiviarium/hatchery"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery.svg"><img src="https://raw.githubusercontent.com/aiviarium/.github/main/brand/lockups/lockup-hatchery-light.svg" alt="Hatchery" height="56"></picture></a></h1>
+
+[![Aiviarium Hatchery](https://aiviarium-badges.helight.workers.dev/aiviarium/badge/Aiviarium-Hatchery-x?tone=hatchery)](https://github.com/aiviarium)
+[![CI](https://aiviarium-badges.helight.workers.dev/hatchery/github/actions/workflow/status/aiviarium/hatchery/ci.yml?branch=main&label=CI)](https://github.com/aiviarium/hatchery/actions/workflows/ci.yml)
+[![License](https://aiviarium-badges.helight.workers.dev/hatchery/github/license/aiviarium/hatchery)](#license)
+
+Packaging and distribution for plugins and modular software.
 
 Hatchery is a Rust library and a command, `hatchery`. Use it to pack a package folder into an egg and publish the egg to a registry. It also resolves versions, verifies eggs and installs them.
 
-A package can hold content for several tools. Each tool, called a target, installs only its own part. An agent integration for two tools can then be one versioned package.
+A package can hold content for several tools. Each tool, called a target, installs only its own part. An integration for two tools can then be one versioned package.
 
 Hatchery is not a plugin runtime. It doesn't read what a package contributes or run a package's code. Each tool that installs packages has its own manifests, loaders and execution.
 
