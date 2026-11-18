@@ -152,7 +152,7 @@ hatchery add --git https://github.com/aiviarium/parrot.git --path agents/claude 
 hatchery update [NAME] [--dir DIR] [--target NAME]… [--fact NAME=VALUE]… [--on-demand]
 ```
 
-Updates one package, or all, to the newest allowed versions.
+Updates one package, or all, to the newest allowed versions. The options are those of [`add`](#add), and at least one `--target` is required.
 
 ## install
 
@@ -160,7 +160,7 @@ Updates one package, or all, to the newest allowed versions.
 hatchery install [--dir DIR] [--target NAME]… [--fact NAME=VALUE]… [--on-demand]
 ```
 
-Installs exactly what `eggs.lock` lists, and checks checksums and commits. A package is left alone when its folder already contains the locked version, unpacked from the locked egg.
+Installs exactly what `eggs.lock` lists, and checks checksums and commits. A package is left alone when its folder already contains the locked version, unpacked from the locked egg. The options are those of [`add`](#add), and at least one `--target` is required.
 
 ## remove
 
@@ -222,7 +222,7 @@ hatchery registry add KIND LOCATION [--only G,…] [--key K] [--min-age D] [--to
 hatchery registry remove LOCATION
 ```
 
-Edits the configuration file in place and keeps its comments and layout. `KIND` is `git`, `http` or `dir`. If no configuration file is found, `add` creates `./hatchery.kdl`.
+Edits the configuration file in place and keeps its comments and layout. `KIND` is `git`, `http` or `dir`. If no configuration file is found, `add` creates `./hatchery.kdl`. If `HATCHERY_CONFIG` names a file that does not exist yet, `add` creates that file.
 
 ## A CI pipeline
 

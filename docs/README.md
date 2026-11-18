@@ -4,16 +4,16 @@ Hatchery packs a package folder into an egg and publishes eggs to a registry. It
 
 | Page | What it covers |
 | --- | --- |
-| [Concepts](concepts.md) | Eggs, targets, requirements, variants, sources, minimum release age and trust |
+| [Concepts](concepts.md) | Eggs, targets, requirements, variants, sources, resolution and trust |
 | [package.kdl](package-kdl.md) | The manifest of one package |
 | [packages.kdl](packages-kdl.md) | The root manifest of a repository, with defaults, package locations and releases |
 | [hatchery.kdl](hatchery-kdl.md) | The registries an installation searches |
 | [eggs.lock](eggs-lock.md) | What is installed and from where |
+| [Eggs](egg.md) | The layout of base, variant and fat eggs |
 | [Registries](registries.md) | Static registries, a git repository as a registry, publishing, signing and withdrawing |
 | [Command line](cli.md) | Every command and flag, with a CI pipeline |
 | [Rust API](api.md) | The client, the three traits, `Egg`, publishing and the errors |
 | [Playground](playground.md) | A folder with example packages and a registry to try the command in |
-| [Decisions](decisions.md) | What the formats left open and what Hatchery chose |
 
 ## Where to start
 

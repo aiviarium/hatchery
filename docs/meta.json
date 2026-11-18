@@ -11,9 +11,9 @@
     "packages-kdl",
     "hatchery-kdl",
     "eggs-lock",
+    "egg",
     "---Reference---",
     "cli",
-    "api",
-    "decisions"
+    "api"
   ]
 }

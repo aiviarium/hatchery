@@ -1,6 +1,6 @@
 # Rust API
 
-The `hatchery` crate is one `Client`, one trait for each extension point, and plain data types. A tool extends it with its own trait implementations and never changes the crate.
+The `hatchery` crate is one `Client`, one trait for each extension point, and plain data types. A tool adapts Hatchery with its own versions of the traits.
 
 ```toml
 [dependencies]
@@ -15,6 +15,8 @@ hatchery = { git = "https://github.com/aiviarium/hatchery", tag = "v0.1.0", feat
 Both are off by default. The library has no async runtime. `hatchery::block_on` runs a future to completion on the current thread.
 
 The futures block the thread they run on. They run `git` and wait for it, and `HttpFetch` waits for ureq. An async caller runs each client call on a thread for blocking work, such as `tokio::task::spawn_blocking`, and drives it there with `block_on`. A `Fetch` of your own that does not block doesn't help with a git registry, since git still blocks.
+
+The trait methods return `BoxFuture` from `hatchery::fetch` rather than being `async fn`, so `Source` and `Fetch` work as trait objects. A source or fetcher of your own returns `Box::pin(async move { … })`.
 
 ## A usage example
 
@@ -83,7 +85,7 @@ pub trait Source: Send + Sync {
 }
 ```
 
-`names`, `details`, `fetch_variant` and `warnings` have default bodies. `warnings` reports what the source skipped, such as a package whose `package.kdl` it cannot read. The client adds them to its reports and listings. `Source::fetch` returns an egg whose checksum and signature the source has verified, and whose manifest names the offered package and version.
+`names`, `details`, `fetch_variant` and `warnings` have default bodies. A source of one package, such as a folder, an egg file or one git folder, answers `names` with that package and `versions` with its one version. `warnings` reports what the source skipped, such as a package whose `package.kdl` it cannot read. The client adds them to its reports and listings. `Source::fetch` returns an egg whose checksum and signature the source has verified, and whose manifest names the offered package and version.
 
 A tool adds a kind of registry with `ClientBuilder::kind(name, factory)`. A registry line of that node name is then served by the factory's source.
 
@@ -114,7 +116,7 @@ Built with `Client::builder()`:
 | Builder method | Meaning |
 | --- | --- |
 | `config(Config)` | The registries and the default minimum release age |
-| `target(impl Target)`, `target_arc` | A tool this client installs for. Call it once per target |
+| `target(impl Target)`, `target_arc` | A tool this client installs for. Call it once per target. A package must have at least one of them. Requirements, dependencies and variants are read for those targets only |
 | `fetch(impl Fetch)`, `fetch_arc` | How HTTP registries and egg addresses are fetched. Without one, they fail |
 | `cache_dir(path)` | Where git checkouts are cached. `$HATCHERY_CACHE` by default, or `hatchery` in the user's cache folder when it is not set |
 | `clock(Clock)` | The time source, for tests |
@@ -129,7 +131,7 @@ Built with `Client::builder()`:
 | `update(name, dir).await` | Updates one package, or all with `None` |
 | `install(dir).await` | Installs exactly what `eggs.lock` lists |
 | `remove(name, dir)` | Removes a package. Refuses while a dependent is installed |
-| `installed(dir)` | The packages in a folder, as `Installed` |
+| `installed(dir)` | The packages in a folder, as `Installed`. Its version is the one in the package's folder |
 | `withdrawn(dir).await` | The installed packages whose version their registry has withdrawn since, with the reason |
 | `variant(&Installed, &Platform).await` | The files of one variant. Downloads and verifies its egg on first use |
 | `fetch(spec, variants, &Options).await` | Fetches the base egg and variant eggs without installing. `variants` are named `<target>.<key>`, all when `None` |
@@ -182,7 +184,11 @@ pub fn tree_digest(dir: &Path) -> Result<String>;
 
 The `sign` module has `parse_signing_key`, `parse_verifying_key`, `format_signing_key`, `format_verifying_key`, `message`, `sign` and `verify`. Keys are written `ed25519:` and 64 hex digits.
 
+`message` builds the bytes that are signed: a fixed tag, then the package, version, file name, SHA-256 and publish time, one on each line. The signature is lowercase hex.
+
 ## Data types
+
+Resolution, the git cache and the archive writer are private, so a minor release can change them. The public API is the client, the traits, the sources, the errors and the data types below.
 
 The structs with public fields and the enums other than `Error` are marked `non_exhaustive`, so a later version can add a field or a variant. Read their fields and match with `..`. To make one, use its constructor or its builder:
 

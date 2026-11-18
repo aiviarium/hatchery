@@ -41,9 +41,11 @@ A tool can add a kind with `ClientBuilder::kind`, backed by its own `Source`.
 | `key="ed25519:…"` | The registry's public key. Eggs from it must be signed. For a `git` registry, a version that has only a tag is not installed |
 | `unsigned-tags=#true` | For a `git` registry with a `key`: install versions that have only a tag from source, unsigned. Anyone who can push a tag can then release. Off by default |
 | `min-age="3d"` | The minimum release age for this registry |
-| `token-env="VAR"` | The environment variable with a bearer token for it. It must be set. Hatchery sends the token over `https://`, and over plain `http://` only to this machine |
+| `token-env="VAR"` | The environment variable with a bearer token for it. It must be set and not empty. Hatchery sends the token over `https://`, and over plain `http://` only to `localhost` or a loopback address |
 
 Other properties are kept and given to a tool's own `kind`.
+
+A client is not built when a `token-env` variable is missing or empty, or when the token would go to another `http://` address.
 
 The order of the lines is the search order. The first registry that has a package serves it.
 
@@ -55,7 +57,18 @@ A duration is a number and a unit: `s`, `m`, `h`, `d` or `w`. `0` is also accept
 
 ## Secrets
 
-The file has no secrets in it. `token-env` names a variable, and signing keys are passed the same way. Apart from secret values, Hatchery reads two environment variables, `HATCHERY_CONFIG` and `HATCHERY_CACHE`. `HATCHERY_CACHE` names the folder that caches git repositories. Without it, the cache is `hatchery` in the user's cache folder.
+The file has no secrets in it. `token-env` names a variable, and signing keys are passed the same way.
+
+## Environment
+
+Apart from secret values, Hatchery reads two environment variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `HATCHERY_CONFIG` | The configuration file, as in [Finding the file](#finding-the-file) |
+| `HATCHERY_CACHE` | The cache folder. Git repositories are cached in its `git` folder |
+
+Without `HATCHERY_CACHE`, git repositories are cached in `$XDG_CACHE_HOME/hatchery/git`, or `~/.cache/hatchery/git`, and `%LOCALAPPDATA%\hatchery\git` on Windows. Each repository has one folder, and one process uses it at a time.
 
 ## Editing
 
