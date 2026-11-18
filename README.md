@@ -84,6 +84,8 @@ let report = block_on(client.add(&Spec::parse("example/hello@^0.1")?, "./plugins
 
 ## Documentation
 
+The documentation is published at <https://aiviarium.github.io/hatchery/>. The pages are the Markdown files in [docs](docs/README.md), which also read here.
+
 - [Concepts](docs/concepts.md) covers eggs, targets, requirements, variants, sources, minimum release age and trust.
 - [package.kdl](docs/package-kdl.md), [packages.kdl](docs/packages-kdl.md), [hatchery.kdl](docs/hatchery-kdl.md) and [eggs.lock](docs/eggs-lock.md) are the file formats.
 - [Registries](docs/registries.md) covers static registries, a git repository as a registry, publishing, signing and withdrawing.

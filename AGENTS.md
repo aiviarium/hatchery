@@ -15,7 +15,8 @@ Hatchery is a Rust library and a command. It turns package folders into eggs and
 | `crates/hatchery/src/git.rs`, `fetch.rs`, `fetch_http.rs`, `exec.rs` | The `git` command and its cache, the `Fetch` trait with its ureq version, and `block_on` |
 | `crates/hatchery/tests/` | Integration tests. `tests/common/mod.rs` has package folders, git helpers and a fixed clock |
 | `crates/hatchery-cli/` | The `hatchery` command. `args.rs` is the grammar in clap, and one module for each group of commands |
-| `docs/` | The documentation, in Markdown |
+| `docs/` | The documentation, in Markdown. It reads on GitHub and is also the content of the site |
+| `site/` | The documentation site at <https://aiviarium.github.io/hatchery/>. It follows [aiviarium/docs-base](https://github.com/aiviarium/docs-base) at dcffeac. See `site/AGENTS.md` |
 | `examples/` | Example packages and the playground scripts. See `docs/playground.md` |
 | `ci/checks.sh` | The checks CI runs |
 | `.vale/` | The prose rules |
@@ -38,6 +39,7 @@ Name checks to run only those, as in `ci/checks.sh fmt clippy`. The table lists 
 | `typos` | [typos](https://github.com/crate-ci/typos) | Spelling in code and docs. Exceptions go in `_typos.toml` |
 | `deny` | [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) | Licenses, advisories and sources of dependencies, by `deny.toml` |
 | `links` | [lychee](https://lychee.cli.rs) | Links between the Markdown files |
+| `site` | npm | Types, lints and links of the documentation site, and its build at the root and with `DOCS_BASE_PATH=/hatchery` |
 
 CI also builds with the Rust version in `rust-version`, and runs `examples/playground.sh` and `examples/playground-check.sh`.
 
@@ -52,6 +54,7 @@ The tests use `git`, which has to be installed. They run it with a fixed identit
 - Eggs are written deterministically. A change to the writers keeps the same input giving the same SHA-256.
 - A change to a file format keeps format 1 additive: only optional nodes. Unknown nodes are kept when a file is written again.
 - Documentation is written for people, in short sentences and with tables for lookups. It has to pass vale.
+- A page in `docs/` has no front matter. Its first `# heading` is its title, and it links to other pages by file name. A new page goes into `docs/meta.json`. `site/AGENTS.md` says how the site reads the files.
 - Every public item of the library has a doc comment that says what a caller needs to know.
 - A change to what a command prints or accepts updates `docs/cli.md`, and `docs/playground.md` and `examples/playground-check.sh` when a step there changes.
 - Tests and examples use made-up names such as `example` and `demo`, and `example.org` addresses. The names `crow` and `rookery` are fine as made-up target names.
