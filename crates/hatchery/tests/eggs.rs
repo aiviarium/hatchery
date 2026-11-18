@@ -887,6 +887,11 @@ fn pack_refuses_unsafe_names() {
         );
         write(d.path(), "crow/readme.md", "a");
         write(d.path(), &format!("crow/{bad}"), "b");
+        // A case-insensitive file system holds one file for both spellings, so
+        // there is no collision to refuse.
+        if std::fs::read_dir(d.path().join("crow")).unwrap().count() < 2 {
+            continue;
+        }
         let o = PackOptions::new().base(true).no_build(true);
         let err = pack(d.path(), &o).unwrap_err();
         assert!(err.to_string().contains(bad), "{bad}: {err}");
