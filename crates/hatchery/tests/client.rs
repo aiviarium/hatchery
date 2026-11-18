@@ -1245,7 +1245,8 @@ fn names_that_differ_only_by_case_cannot_share_a_folder() {
     );
     let err = block_on(client.add(&Spec::Folder(dir), &out)).unwrap_err();
     assert!(err.to_string().contains("differ only by case"), "{err}");
-    assert!(!out.join("demo").exists());
+    // On a case-insensitive file system `demo` is `Demo`, so look for the package.
+    assert!(!out.join("demo").join("three").exists());
     // So are `Demo/one` and `Demo/ONE`.
     let err = block_on(client.add(&Spec::Folder(folder("d", "ONE")), &out)).unwrap_err();
     assert!(err.to_string().contains("differ only by case"), "{err}");
