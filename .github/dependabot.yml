@@ -15,3 +15,12 @@ updates:
     open-pull-requests-limit: 0
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /site
+    labels: [dependencies]
+    open-pull-requests-limit: 0
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]

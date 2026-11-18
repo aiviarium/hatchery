@@ -84,9 +84,25 @@ jobs:
       - run: examples/playground.sh
       - run: examples/playground-check.sh
 
+  # The documentation site in site/, which GitHub Pages serves.
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The full history gives each page its "Last updated" date.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: ci/checks.sh site
+
   # The check that branch protection can require.
   ci:
-    needs: [checks, test, msrv, playground]
+    needs: [checks, test, msrv, playground, site]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
