@@ -1,6 +1,6 @@
 # Working on the documentation site
 
-This folder is the documentation site of Hatchery, served at <https://aiviarium.github.io/hatchery/>. It is a static Fumadocs site on Next.js and follows [aiviarium/docs-base](https://github.com/aiviarium/docs-base) at commit dcffeac. This file is for coding agents working in it.
+This folder is the documentation site of Hatchery, served at <https://hatchery.helight.dev/>. It is a static Fumadocs site on Next.js and follows [aiviarium/docs-base](https://github.com/aiviarium/docs-base) at commit dcffeac. This file is for coding agents working in it.
 
 ## Layout
 

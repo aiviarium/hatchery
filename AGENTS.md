@@ -16,7 +16,7 @@ Hatchery is a Rust library and a command. It turns package folders into eggs and
 | `crates/hatchery/tests/` | Integration tests. `tests/common/mod.rs` has package folders, git helpers and a fixed clock |
 | `crates/hatchery-cli/` | The `hatchery` command. `args.rs` is the grammar in clap, and one module for each group of commands |
 | `docs/` | The documentation, in Markdown. It reads on GitHub and is also the content of the site |
-| `site/` | The documentation site at <https://aiviarium.github.io/hatchery/>. It follows [aiviarium/docs-base](https://github.com/aiviarium/docs-base) at dcffeac. See `site/AGENTS.md` |
+| `site/` | The documentation site at <https://hatchery.helight.dev/>. It follows [aiviarium/docs-base](https://github.com/aiviarium/docs-base) at dcffeac. See `site/AGENTS.md` |
 | `examples/` | Example packages and the playground scripts. See `docs/playground.md` |
 | `ci/checks.sh` | The checks CI runs |
 | `.vale/` | The prose rules |
