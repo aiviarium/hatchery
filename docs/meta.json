@@ -1,0 +1,19 @@
+{
+  "title": "Hatchery",
+  "pages": [
+    "---Guide---",
+    "README",
+    "concepts",
+    "playground",
+    "registries",
+    "---File formats---",
+    "package-kdl",
+    "packages-kdl",
+    "hatchery-kdl",
+    "eggs-lock",
+    "---Reference---",
+    "cli",
+    "api",
+    "decisions"
+  ]
+}
