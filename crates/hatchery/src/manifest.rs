@@ -23,6 +23,7 @@ pub const FORMAT: u32 = 1;
 
 /// The manifest of one package, `package.kdl`. [`Manifest::parse`] and [`Manifest::load`] read it, and [`Manifest::to_kdl`] writes it.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Manifest {
     /// The `format` number. [`FORMAT`] when the file has none.
     pub format: u32,
@@ -40,6 +41,7 @@ pub struct Manifest {
 
 /// The `package` section: the identity of a package.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Package {
     /// Who publishes the package. Letters, digits, `-`, `_` and `.`, not starting with `.`.
     pub group: String,
@@ -53,6 +55,7 @@ pub struct Package {
 
 /// Display data. Nothing here affects resolution or installing.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct About {
     /// A display name, such as `Claude Code`.
     pub name: Option<String>,
@@ -80,6 +83,7 @@ pub struct About {
 
 /// One target of a package: the content for one tool, with what the tool needs to install it.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct TargetSpec {
     /// The target's name, such as `crow`. ASCII letters, digits, `-` and `_`, and never `variants`.
     pub name: String,
@@ -109,6 +113,7 @@ pub struct TargetSpec {
 
 /// One line of a `requires` block: a fact and the values wanted for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Requirement {
     /// The fact name, such as `os` or `rookery`.
     pub fact: String,
@@ -118,6 +123,7 @@ pub struct Requirement {
 
 /// One line of `dependencies` or `optional-dependencies`: a package and the versions that are wanted.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Dependency {
     /// The id of the package.
     pub id: String,
@@ -129,7 +135,43 @@ pub struct Dependency {
     pub range: VersionReq,
 }
 
+impl Requirement {
+    /// A line that accepts these values of a fact. With none, the fact only
+    /// has to be present.
+    pub fn new(fact: impl Into<String>, values: Vec<String>) -> Requirement {
+        Requirement {
+            fact: fact.into(),
+            values,
+        }
+    }
+}
+
+impl VariantSpec {
+    /// A variant for this os and arch, in its default folder, with no build
+    /// command.
+    pub fn new(os: Option<String>, arch: Option<String>) -> VariantSpec {
+        VariantSpec {
+            os,
+            arch,
+            path: None,
+            build: None,
+            extra: Vec::new(),
+        }
+    }
+}
+
 impl Dependency {
+    /// A dependency on `id` in the package's own group, or in `group`, with
+    /// the versions of `range`.
+    pub fn new(group: Option<String>, id: impl Into<String>, range: VersionReq) -> Dependency {
+        Dependency {
+            id: id.into(),
+            group,
+            raw: range.to_string(),
+            range,
+        }
+    }
+
     /// The full name of the package. `own_group` is the group of the package that has the dependency, for a line that names none.
     pub fn name(&self, own_group: &str) -> Name {
         Name {
@@ -141,6 +183,7 @@ impl Dependency {
 
 /// A folder laid over the target's files for one os, one arch, or both.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct VariantSpec {
     /// The OS the variant is for. None fits any OS.
     pub os: Option<String>,
@@ -259,6 +302,7 @@ impl TargetSpec {
 
 /// Where an egg was built from. Written by `hatchery pack`.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Origin {
     /// The address of the source repository. The `repository` of `about` when set, else the `origin` remote of the checkout with any user and password removed.
     pub repository: Option<String>,
@@ -272,8 +316,44 @@ pub struct Origin {
     pub extra: Vec<KdlNode>,
 }
 
+impl Origin {
+    /// An origin with nothing in it, the same as [`Origin::default`].
+    pub fn new() -> Origin {
+        Origin::default()
+    }
+
+    /// Sets the address of the source repository.
+    #[must_use]
+    pub fn repository(mut self, repository: impl Into<String>) -> Origin {
+        self.repository = Some(repository.into());
+        self
+    }
+
+    /// Sets the commit.
+    #[must_use]
+    pub fn commit(mut self, commit: impl Into<String>) -> Origin {
+        self.commit = Some(commit.into());
+        self
+    }
+
+    /// Sets the build time.
+    #[must_use]
+    pub fn built(mut self, built: Timestamp) -> Origin {
+        self.built = Some(built);
+        self
+    }
+
+    /// Sets the Hatchery version.
+    #[must_use]
+    pub fn hatchery(mut self, version: impl Into<String>) -> Origin {
+        self.hatchery = Some(version.into());
+        self
+    }
+}
+
 /// Values a repository's `packages.kdl` gives every package.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Defaults {
     /// The group of packages that name none.
     pub group: Option<String>,
@@ -555,6 +635,25 @@ pub fn merge_about(own: &About, defaults: &About) -> About {
 }
 
 impl Manifest {
+    /// A manifest with only a name and a version: no about data, no targets
+    /// and no origin. For a [`Target::derive`](crate::Target::derive) that
+    /// builds one in code.
+    pub fn new(name: &Name, version: Version) -> Manifest {
+        Manifest {
+            format: FORMAT,
+            package: Package {
+                group: name.group.clone(),
+                id: name.id.clone(),
+                version,
+                extra: Vec::new(),
+            },
+            about: About::default(),
+            targets: Vec::new(),
+            origin: None,
+            extra: Vec::new(),
+        }
+    }
+
     /// Parses a manifest that stands alone.
     pub fn parse(text: &str) -> Result<Manifest> {
         Manifest::parse_with(text, None)

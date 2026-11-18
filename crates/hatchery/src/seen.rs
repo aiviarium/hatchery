@@ -97,11 +97,6 @@ impl Seen {
         Ok(())
     }
 
-    /// Whether the records changed since they were read or last saved, so that [`Seen::save`] has something to write.
-    pub fn is_dirty(&self) -> bool {
-        self.dirty
-    }
-
     /// Notes the versions a registry listed for a package. Versions not
     /// seen before get `now`; when the package was not seen at all, they
     /// are the first listing.
@@ -259,16 +254,16 @@ mod tests {
         let name = Name::parse("aiviarium/claude").unwrap();
         let v = Version::parse("1.4.0-rc.1").unwrap();
         let mut seen = Seen::load(tmp.path()).unwrap();
-        assert!(!seen.is_dirty());
+        assert!(!seen.dirty);
         seen.record(
             "https://eggs.example.org",
             &name,
             [&v],
             t("2026-11-10T00:00:00Z"),
         );
-        assert!(seen.is_dirty());
+        assert!(seen.dirty);
         seen.save(tmp.path()).unwrap();
-        assert!(!seen.is_dirty());
+        assert!(!seen.dirty);
         let back = Seen::load(tmp.path()).unwrap();
         assert_eq!(back, seen);
         assert!(

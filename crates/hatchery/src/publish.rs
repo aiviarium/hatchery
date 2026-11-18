@@ -18,6 +18,7 @@ use crate::time::Timestamp;
 
 /// Where to publish.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PublishTo {
     /// A static registry folder.
     Dir(PathBuf),
@@ -35,6 +36,7 @@ pub enum PublishTo {
 
 /// What was published.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Published {
     /// The package the egg belongs to.
     pub name: Name,

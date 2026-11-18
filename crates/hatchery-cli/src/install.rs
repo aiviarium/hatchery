@@ -84,10 +84,8 @@ pub fn fetch(config: Option<&Path>, a: Fetch) -> Res {
         }
         Some(a.variant.clone())
     };
-    let opts = Options {
-        allow_young: a.allow_young,
-    };
-    let Fetched { base, variants } =
+    let opts = Options::new().allow_young(a.allow_young);
+    let Fetched { base, variants, .. } =
         hatchery::block_on(client.fetch(&spec(&a.source)?, variants.as_deref(), &opts))?;
 
     io(fs::create_dir_all(&a.out), &a.out)?;
@@ -109,9 +107,7 @@ pub fn fetch(config: Option<&Path>, a: Fetch) -> Res {
 pub fn add(config: Option<&Path>, a: Add) -> Res {
     need_target(&a.tools)?;
     let client = client(config, &a.tools, a.on_demand)?;
-    let opts = Options {
-        allow_young: a.allow_young,
-    };
+    let opts = Options::new().allow_young(a.allow_young);
     let r = hatchery::block_on(client.add_with(&spec(&a.source)?, &a.dir, &opts))?;
     print_report(&r);
     Ok(())

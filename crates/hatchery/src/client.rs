@@ -34,6 +34,7 @@ pub type SourceFactory =
 
 /// What a [`SourceFactory`] may use.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct SourceContext {
     /// The [`Fetch`] the client was built with. None when it has none, so an `http` registry cannot be read.
     pub fetch: Option<Arc<dyn Fetch>>,
@@ -224,14 +225,31 @@ impl ClientBuilder {
 
 /// Changes how one `add` or `update` resolves.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Options {
     /// Install the named package even if it is younger than the minimum
     /// release age.
     pub allow_young: bool,
 }
 
+impl Options {
+    /// The default options: the minimum release age applies.
+    pub fn new() -> Options {
+        Options::default()
+    }
+
+    /// Installs the named package even if it is younger than the minimum
+    /// release age.
+    #[must_use]
+    pub fn allow_young(mut self, allow_young: bool) -> Options {
+        self.allow_young = allow_young;
+        self
+    }
+}
+
 /// What an `add`, `update` or `install` did.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Report {
     /// The install folder the operation ran in.
     pub dir: PathBuf,
@@ -243,6 +261,7 @@ pub struct Report {
 
 /// One package an operation installed.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Change {
     /// The package that was installed.
     pub name: Name,
@@ -260,6 +279,7 @@ pub struct Change {
 
 /// A package installed in a folder.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Installed {
     /// The package.
     pub name: Name,
@@ -281,6 +301,7 @@ pub struct Installed {
 
 /// A package the registries offer, for listings.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Offered {
     /// The package, as `group/id`.
     pub name: Name,
@@ -301,6 +322,7 @@ pub struct Offered {
 
 /// What [`Client::offered`] found.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct Listing {
     /// The packages, sorted by name.
     pub packages: Vec<Offered>,
@@ -311,6 +333,7 @@ pub struct Listing {
 
 /// One version of an [`Offered`] package.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct OfferedVersion {
     /// The version.
     pub version: Version,
@@ -326,6 +349,7 @@ pub struct OfferedVersion {
 
 /// The eggs `fetch` got.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Fetched {
     /// The base egg.
     pub base: Egg,

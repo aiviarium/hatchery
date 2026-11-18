@@ -83,6 +83,9 @@ What the formats left open, and what Hatchery chose. Each line is a rule you can
 - `publish` returns `Published`, which gives the file name and SHA-256 of the egg, the publish time, and whether it was signed.
 - A client may install for several targets. A package needs at least one of them. Requirements, dependencies and variants come from those targets only.
 - A base egg is unpacked whole, with the shared files of every target. Only the targets of the client are checked and locked. Their folders stay in the package folder even though the lock records only the client's targets.
+- The public API is the client, the traits, the sources, the errors and the data types that a caller reads or builds. Resolution, the git cache, the tar writer and the file helpers are private, so they can change in a minor release.
+- Structs with public fields and the enums other than `Error` are `non_exhaustive`. A caller makes one with its constructor or builder, so a new field is not a breaking change.
+- The futures block their thread while git or `HttpFetch` runs. An executor is not needed, and an async caller runs a client call on a thread for blocking work.
 
 ## Resolution and installs
 

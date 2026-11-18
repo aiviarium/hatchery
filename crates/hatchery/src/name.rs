@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 
 /// A package's group and id, written `group/id`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct Name {
     /// The group, who publishes the package. Letters, digits, `-`, `_` and `.`.
     pub group: String,
@@ -113,6 +114,7 @@ pub fn parse_version(s: &str) -> Result<Version> {
 /// A package named in a registry: `group/id` or the id alone, with an
 /// optional range.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Wanted {
     /// None when the id alone was given; the registries then decide.
     pub group: Option<String>,
@@ -141,6 +143,7 @@ impl Wanted {
 
 /// What to install.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Spec {
     /// From the configured registries: `aiviarium/claude@^1.4` or `claude`.
     Registry(Wanted),

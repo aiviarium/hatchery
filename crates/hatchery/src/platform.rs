@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// An OS and an architecture, named as Rust names them (`linux`, `macos`,
 /// `windows`; `x86_64`, `aarch64`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Platform {
     /// The OS, such as `linux`, `macos` or `windows`.
     pub os: String,
@@ -37,6 +38,7 @@ impl fmt::Display for Platform {
 
 /// Which variants a target fetches when a package is installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Variants {
     /// The variant for this platform, at install. A target that declares
     /// variants and has none for it fails with `NoVariant`.

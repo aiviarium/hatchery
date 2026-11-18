@@ -19,6 +19,7 @@ pub const FORMAT: u32 = 1;
 /// The packages installed in a folder. It is the content of `eggs.lock`.
 /// Keys this version does not know are kept when the file is written again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Lock {
     /// The format of the file, [`FORMAT`]. A file without it is format 1.
     #[serde(default = "format_one")]
@@ -53,6 +54,7 @@ pub(crate) fn check_format(what: &str, format: u32) -> Result<()> {
 
 /// One installed package. Keys this version does not know are kept.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct LockedPackage {
     /// The package.
     pub name: Name,

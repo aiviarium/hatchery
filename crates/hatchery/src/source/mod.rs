@@ -93,6 +93,7 @@ pub trait Source: Send + Sync {
 
 /// One version a source offers.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Offer {
     /// The package.
     pub name: Name,
@@ -150,13 +151,22 @@ impl Offer {
 
 /// A version the publisher pulled after releasing it. A withdrawn version is skipped when resolving.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Withdrawn {
     /// The publisher's reason. None when none was given.
     pub reason: Option<String>,
 }
 
+impl Withdrawn {
+    /// A withdrawal, with the publisher's reason when there is one.
+    pub fn new(reason: Option<String>) -> Withdrawn {
+        Withdrawn { reason }
+    }
+}
+
 /// What resolution needs to know about a version, without its files.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Details {
     /// The display data of the version.
     pub about: About,
@@ -165,6 +175,11 @@ pub struct Details {
 }
 
 impl Details {
+    /// The details of a version with this display data and these targets.
+    pub fn new(about: About, targets: Vec<TargetInfo>) -> Details {
+        Details { about, targets }
+    }
+
     /// The details of a version, read from its manifest. The variants have no checksum, signature or publish time, because a manifest holds none.
     pub fn from_manifest(m: &Manifest) -> Details {
         let group = &m.package.group;
@@ -208,6 +223,7 @@ impl Details {
 
 /// What resolution needs to know of one target of a version.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct TargetInfo {
     /// The target's name.
     pub name: String,
@@ -225,6 +241,7 @@ pub struct TargetInfo {
 
 /// One variant a target declares, with what the source knows of its egg.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VariantInfo {
     /// The variant's `os` key. None when it has none.
     pub os: Option<String>,
@@ -238,7 +255,33 @@ pub struct VariantInfo {
     pub published: Option<Timestamp>,
 }
 
+impl TargetInfo {
+    /// A target with only a name: no build, requirements, dependencies or
+    /// variants.
+    pub fn new(name: impl Into<String>) -> TargetInfo {
+        TargetInfo {
+            name: name.into(),
+            build: false,
+            requires: Vec::new(),
+            dependencies: Vec::new(),
+            optional_dependencies: Vec::new(),
+            variants: Vec::new(),
+        }
+    }
+}
+
 impl VariantInfo {
+    /// A variant for this os and arch, with nothing known of its egg.
+    pub fn new(os: Option<String>, arch: Option<String>) -> VariantInfo {
+        VariantInfo {
+            os,
+            arch,
+            sha256: None,
+            signature: None,
+            published: None,
+        }
+    }
+
     /// The variant's key, its values joined by a dash, such as `linux-x86_64`. `default` when it has neither.
     pub fn key(&self) -> String {
         variant_key(self.os.as_deref(), self.arch.as_deref())

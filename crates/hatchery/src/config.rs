@@ -24,6 +24,7 @@ pub const NETWORK_MIN_AGE: Duration = Duration::from_secs(3 * 86_400);
 
 /// The registries an installation searches and how long new versions wait. It is read from `hatchery.kdl`, and editing it keeps the file's comments and layout.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     /// The minimum release age of registries that have no `min-age` of their own. None when the file has no `default` line. [`Config::min_age_for`] gives the age that applies.
     pub default_min_age: Option<Duration>,
@@ -34,6 +35,7 @@ pub struct Config {
 
 /// One line of the `registries` block.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RegistryConfig {
     /// The node name: `git`, `http`, `dir`, or a kind a tool adds.
     pub kind: String,

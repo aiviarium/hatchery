@@ -14,21 +14,21 @@
 // A library reports through its return values. Printing is the caller's.
 #![warn(clippy::print_stdout, clippy::print_stderr)]
 
-pub mod archive;
+mod archive;
 #[cfg(feature = "blocking")]
 pub mod blocking;
 pub mod client;
 pub mod config;
-pub mod digest;
+mod digest;
 pub mod egg;
 pub mod error;
 mod exec;
 pub mod fetch;
 #[cfg(feature = "http")]
 mod fetch_http;
-pub mod fsx;
-pub mod git;
-pub mod glob;
+mod fsx;
+mod git;
+mod glob;
 pub mod index;
 mod kdlx;
 pub mod lock;
@@ -38,8 +38,8 @@ pub mod pack;
 pub mod platform;
 pub mod publish;
 pub mod repo;
-pub mod resolve;
-pub mod seen;
+mod resolve;
+mod seen;
 pub mod sign;
 pub mod source;
 pub mod target;
@@ -69,6 +69,14 @@ pub use sign::{SigningKey, VerifyingKey};
 pub use source::{Details, Offer, Source};
 pub use target::{Problem, StaticTarget, Target, TargetFiles};
 pub use time::Timestamp;
+
+// The helpers of the integration tests, for the unit tests that reach the
+// crate's own items. They name the crate `hatchery`.
+#[cfg(test)]
+extern crate self as hatchery;
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_common;
 
 /// This crate's version, written into the origin of every egg it packs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -299,11 +299,6 @@ impl Resolver {
         &self.sources[idx]
     }
 
-    /// The time the minimum release age counts to, as it was given to [`Resolver::new`].
-    pub fn now(&self) -> Timestamp {
-        self.now
-    }
-
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }

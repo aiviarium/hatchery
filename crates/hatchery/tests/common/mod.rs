@@ -7,9 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
+use hatchery::Git;
 use hatchery::Timestamp;
-use hatchery::git::Git;
 use hatchery::time::Clock;
+
+pub mod repo;
 
 /// Writes a file, creating its folders.
 pub fn write(dir: &Path, rel: &str, content: impl AsRef<[u8]>) -> PathBuf {

@@ -89,15 +89,10 @@ fn package(root: &Path, version: &str, salt: &str) -> PathBuf {
 }
 
 fn options() -> PackOptions<'static> {
-    PackOptions {
-        no_build: true,
-        origin: Some(Origin {
-            built: Some(t("2026-11-01T00:00:00Z")),
-            ..Origin::default()
-        }),
-        now: Some(t("2026-11-01T00:00:00Z")),
-        ..PackOptions::default()
-    }
+    PackOptions::new()
+        .no_build(true)
+        .origin(Origin::new().built(t("2026-11-01T00:00:00Z")))
+        .now(t("2026-11-01T00:00:00Z"))
 }
 
 /// The base egg and the variant eggs of a folder.
@@ -109,10 +104,7 @@ fn eggs(dir: &Path) -> (Egg, Vec<Egg>) {
 }
 
 fn fat(dir: &Path) -> Egg {
-    let opts = PackOptions {
-        fat: true,
-        ..options()
-    };
+    let opts = options().fat(true);
     pack(dir, &opts).unwrap().pop().unwrap()
 }
 
@@ -563,16 +555,10 @@ fn an_egg_for_another_package_is_refused() {
             ("rookery/rookery.json", "{}"),
         ],
     );
-    let other = pack(
-        &other_dir,
-        &PackOptions {
-            base: true,
-            ..options()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let other = pack(&other_dir, &options().base(true))
+        .unwrap()
+        .pop()
+        .unwrap();
     let dir = f.reg.join("example/tool");
     fs::write(dir.join("tool-1.4.0.egg"), other.bytes()).unwrap();
     let idx = dir.join("index.json");

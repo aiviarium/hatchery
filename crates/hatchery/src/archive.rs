@@ -174,6 +174,7 @@ fn write_padding<W: Write>(w: &mut W, size: u64) -> std::io::Result<()> {
 
 /// Reads a gzipped tar archive into entries, refusing anything unsafe to
 /// unpack. Directory entries are dropped; the result is sorted by path.
+#[cfg(test)]
 pub fn read(bytes: &[u8]) -> Result<Vec<Entry>> {
     read_limited(bytes, MAX_TOTAL_BYTES)
 }

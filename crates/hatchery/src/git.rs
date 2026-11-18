@@ -42,7 +42,7 @@ impl Default for Git {
 
 /// What `git ls-remote` says about a repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Remote {
+pub(crate) struct Remote {
     /// The branch `HEAD` points at.
     pub default_branch: Option<String>,
     /// Branch name to commit.
@@ -53,6 +53,7 @@ pub struct Remote {
 
 impl Remote {
     /// The commit of the default branch.
+    #[cfg(test)]
     pub fn default_commit(&self) -> Option<&str> {
         self.default_branch
             .as_ref()
@@ -80,13 +81,13 @@ impl Git {
 
     /// Runs git in a folder (or where the process is when None) and returns
     /// its standard output.
-    pub fn run(&self, dir: Option<&Path>, args: &[&str]) -> Result<Vec<u8>> {
+    pub(crate) fn run(&self, dir: Option<&Path>, args: &[&str]) -> Result<Vec<u8>> {
         self.exec(dir, &[], args, &[])
     }
 
     /// Runs git and returns its standard output as text, without the final
     /// newline.
-    pub fn run_text(&self, dir: Option<&Path>, args: &[&str]) -> Result<String> {
+    pub(crate) fn run_text(&self, dir: Option<&Path>, args: &[&str]) -> Result<String> {
         let out = self.run(dir, args)?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
@@ -160,7 +161,7 @@ impl Git {
     }
 
     /// One `git ls-remote`: the default branch, the branches and the tags.
-    pub fn ls_remote(&self, url: &str) -> Result<Remote> {
+    pub(crate) fn ls_remote(&self, url: &str) -> Result<Remote> {
         check_url(url)?;
         let out = self.run_text(
             None,
@@ -179,7 +180,7 @@ impl Git {
 
     /// Opens the cache folder of a repository under `root`, creating it on
     /// first use, and holds its lock until the result is dropped.
-    pub fn cache(&self, root: &Path, url: &str) -> Result<RepoCache> {
+    pub(crate) fn cache(&self, root: &Path, url: &str) -> Result<RepoCache> {
         check_url(url)?;
         fs::create_dir_all(root).at_path(root)?;
         let name: String = sha256_hex(url.as_bytes()).chars().take(16).collect();
@@ -389,7 +390,7 @@ impl Drop for Scratch {
 /// The cache folder of one repository: a shallow, partial clone that
 /// is reused for every package of the repository. Holds the folder's lock.
 #[derive(Debug)]
-pub struct RepoCache {
+pub(crate) struct RepoCache {
     dir: PathBuf,
     git: Git,
     url: String,
@@ -398,6 +399,7 @@ pub struct RepoCache {
 
 impl RepoCache {
     /// The cache folder of the repository's checkout.
+    #[cfg(test)]
     pub fn dir(&self) -> &Path {
         &self.dir
     }
@@ -926,6 +928,10 @@ pub(crate) fn pack_checkout(
         .find(|e| e.variant().is_some() == want_variant)
         .ok_or_else(|| Error::other("packing gave no egg"))
 }
+
+#[cfg(test)]
+#[path = "git_tests.rs"]
+mod cache_tests;
 
 #[cfg(test)]
 mod tests {

@@ -9,9 +9,12 @@ use crate::args::Pack;
 use crate::{Fail, Res, io};
 
 pub fn run(a: Pack) -> Res {
-    let mut variants = Vec::new();
+    let mut opts = PackOptions::new()
+        .base(a.base)
+        .fat(a.fat)
+        .no_build(a.no_build);
     for v in group_variants(&a.variant) {
-        variants.push(parse_variant(&v)?);
+        opts = opts.variant(parse_variant(&v)?);
     }
     let checks = a
         .check
@@ -19,13 +22,6 @@ pub fn run(a: Pack) -> Res {
         .map(|c| parse_check(c))
         .collect::<Res<Vec<_>>>()?;
 
-    let opts = PackOptions {
-        base: a.base,
-        variants,
-        fat: a.fat,
-        no_build: a.no_build,
-        ..PackOptions::default()
-    };
     let eggs = hatchery::pack(&a.dir, &opts)?;
 
     if !checks.is_empty() {
@@ -71,15 +67,11 @@ fn group_variants(vals: &[String]) -> Vec<Vec<String>> {
 /// `--variant rookery arch=x86_64 os=linux`.
 fn parse_variant(vals: &[String]) -> Res<VariantPick> {
     let (target, rest) = vals.split_first().ok_or("--variant needs a target")?;
-    let mut pick = VariantPick {
-        target: target.clone(),
-        os: None,
-        arch: None,
-    };
+    let mut pick = VariantPick::new(target);
     for v in rest {
         match v.split_once('=') {
-            Some(("os", x)) if !x.is_empty() => pick.os = Some(x.to_string()),
-            Some(("arch", x)) if !x.is_empty() => pick.arch = Some(x.to_string()),
+            Some(("os", x)) if !x.is_empty() => pick = pick.os(x),
+            Some(("arch", x)) if !x.is_empty() => pick = pick.arch(x),
             _ => {
                 return Err(Fail::from(format!(
                     "--variant {target}: expected os=VALUE or arch=VALUE, got {v:?}. \

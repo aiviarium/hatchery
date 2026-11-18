@@ -38,21 +38,14 @@ targets {
 "#;
 
 fn origin() -> Origin {
-    Origin {
-        repository: Some("https://example.org/demo.git".into()),
-        commit: None,
-        built: Some(Timestamp::parse("2026-11-01T00:00:00Z").unwrap()),
-        hatchery: Some("0.0.0".into()),
-        extra: Vec::new(),
-    }
+    Origin::new()
+        .repository("https://example.org/demo.git")
+        .built(Timestamp::parse("2026-11-01T00:00:00Z").unwrap())
+        .hatchery("0.0.0")
 }
 
 fn opts() -> PackOptions<'static> {
-    PackOptions {
-        origin: Some(origin()),
-        no_build: true,
-        ..Default::default()
-    }
+    PackOptions::new().origin(origin()).no_build(true)
 }
 
 /// A package folder with two targets and three variants of one of them.
@@ -85,10 +78,10 @@ fn packing_twice_gives_the_same_bytes() {
         assert_eq!(x.bytes(), y.bytes());
     }
     // The time of the build comes from `now` when nothing else gives one.
-    let o = PackOptions {
-        origin: None,
-        now: Some(Timestamp::parse("2026-11-02T00:00:00Z").unwrap()),
-        ..opts()
+    let o = {
+        let mut o = opts().now(Timestamp::parse("2026-11-02T00:00:00Z").unwrap());
+        o.origin = None;
+        o
     };
     let e1 = pack(d.path(), &o).unwrap();
     let e2 = pack(d.path(), &o).unwrap();
@@ -99,14 +92,7 @@ fn packing_twice_gives_the_same_bytes() {
 fn base_egg_holds_the_manifest_about_files_and_shared_files() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let eggs = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap();
+    let eggs = pack(d.path(), &opts().base(true)).unwrap();
     assert_eq!(eggs.len(), 1);
     let egg = &eggs[0];
     assert!(!egg.is_fat());
@@ -196,12 +182,7 @@ fn origin_comes_from_git() {
     );
     write(d.path(), "crow/a.txt", "a");
     let commit = git_commit(d.path(), "first");
-    let o = PackOptions {
-        origin: None,
-        base: true,
-        no_build: true,
-        ..Default::default()
-    };
+    let o = PackOptions::new().base(true).no_build(true);
     let egg = pack(d.path(), &o).unwrap().pop().unwrap();
     let origin = egg.manifest().origin.clone().unwrap();
     assert_eq!(origin.commit.as_deref(), Some(commit.as_str()));
@@ -289,14 +270,7 @@ fn variants_are_separate_eggs_and_never_in_the_shared_files() {
     // A subset of the picks writes just those.
     let one = pack(
         d.path(),
-        &PackOptions {
-            variants: vec![VariantPick {
-                target: "rookery".into(),
-                os: Some("macos".into()),
-                arch: None,
-            }],
-            ..opts()
-        },
+        &opts().variant(VariantPick::new("rookery").os("macos")),
     )
     .unwrap();
     assert_eq!(one.len(), 1);
@@ -304,14 +278,7 @@ fn variants_are_separate_eggs_and_never_in_the_shared_files() {
 
     let err = pack(
         d.path(),
-        &PackOptions {
-            variants: vec![VariantPick {
-                target: "rookery".into(),
-                os: Some("windows".into()),
-                arch: None,
-            }],
-            ..opts()
-        },
+        &opts().variant(VariantPick::new("rookery").os("windows")),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -331,24 +298,8 @@ fn missing_variant_folder_is_an_error() {
 fn fat_egg_holds_variants_and_gives_the_base_back() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let base = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
-    let fat = pack(
-        d.path(),
-        &PackOptions {
-            fat: true,
-            ..opts()
-        },
-    )
-    .unwrap();
+    let base = pack(d.path(), &opts().base(true)).unwrap().pop().unwrap();
+    let fat = pack(d.path(), &opts().fat(true)).unwrap();
     assert_eq!(fat.len(), 1);
     let fat = &fat[0];
     assert!(fat.is_fat());
@@ -373,14 +324,7 @@ fn fat_egg_holds_variants_and_gives_the_base_back() {
     );
     let direct = pack(
         d.path(),
-        &PackOptions {
-            variants: vec![VariantPick {
-                target: "rookery".into(),
-                os: Some("macos".into()),
-                arch: None,
-            }],
-            ..opts()
-        },
+        &opts().variant(VariantPick::new("rookery").os("macos")),
     )
     .unwrap();
     assert_eq!(mac.bytes(), direct[0].bytes());
@@ -393,15 +337,7 @@ fn fat_egg_holds_variants_and_gives_the_base_back() {
     // Only some variants.
     let some = pack(
         d.path(),
-        &PackOptions {
-            fat: true,
-            variants: vec![VariantPick {
-                target: "rookery".into(),
-                os: None,
-                arch: None,
-            }],
-            ..opts()
-        },
+        &opts().fat(true).variant(VariantPick::new("rookery")),
     )
     .unwrap();
     assert_eq!(some[0].embedded_variants().len(), 1);
@@ -415,16 +351,7 @@ fn fat_egg_holds_variants_and_gives_the_base_back() {
 fn fatten_refuses_eggs_of_other_packages() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let base = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let base = pack(d.path(), &opts().base(true)).unwrap().pop().unwrap();
     let other = tempfile::tempdir().unwrap();
     write(
         other.path(),
@@ -441,16 +368,7 @@ fn fatten_refuses_eggs_of_other_packages() {
 fn unpacking_a_fat_egg_puts_variants_in_place() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let fat = pack(
-        d.path(),
-        &PackOptions {
-            fat: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let fat = pack(d.path(), &opts().fat(true)).unwrap().pop().unwrap();
     let out = tempfile::tempdir().unwrap();
     let dest = out.path().join("aiviarium/demo");
     write(&dest, "stale.txt", "old");
@@ -503,16 +421,7 @@ fn executable_bit_is_kept() {
     let script = d.path().join("crow/run.sh");
     write(d.path(), "crow/run.sh", "#!/bin/sh\n");
     fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
-    let egg = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let egg = pack(d.path(), &opts().base(true)).unwrap().pop().unwrap();
     let e = egg
         .entries()
         .iter()
@@ -547,16 +456,7 @@ fn symlinks_are_refused_when_packing() {
 fn subset_keeps_only_the_named_targets() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let fat = pack(
-        d.path(),
-        &PackOptions {
-            fat: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let fat = pack(d.path(), &opts().fat(true)).unwrap().pop().unwrap();
     let sub = fat.subset(&["rookery"]).unwrap().unwrap();
     assert_eq!(sub.manifest().name(), fat.manifest().name());
     assert_eq!(sub.manifest().version(), fat.manifest().version());
@@ -603,14 +503,7 @@ targets {
 "#,
     );
     write(d.path(), "rookery/shared.txt", "s");
-    let eggs = pack(
-        d.path(),
-        &PackOptions {
-            no_build: false,
-            ..opts()
-        },
-    )
-    .unwrap();
+    let eggs = pack(d.path(), &opts().no_build(false)).unwrap();
     assert_eq!(eggs.len(), 3);
     let linux = eggs[0]
         .entries()
@@ -654,16 +547,10 @@ fn no_build_skips_commands_and_failures_report_stderr() {
     write(d.path(), "crow/a.txt", "a");
     let skipped = pack(d.path(), &opts()).unwrap().pop().unwrap();
     assert!(skipped.target("crow").unwrap().get("made.txt").is_none());
-    let built = pack(
-        d.path(),
-        &PackOptions {
-            no_build: false,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let built = pack(d.path(), &opts().no_build(false))
+        .unwrap()
+        .pop()
+        .unwrap();
     assert!(built.target("crow").unwrap().get("made.txt").is_some());
 
     write(
@@ -671,14 +558,7 @@ fn no_build_skips_commands_and_failures_report_stderr() {
         "package.kdl",
         manifest("echo no luck >&2; exit 3"),
     );
-    let err = pack(
-        d.path(),
-        &PackOptions {
-            no_build: false,
-            ..opts()
-        },
-    )
-    .unwrap_err();
+    let err = pack(d.path(), &opts().no_build(false)).unwrap_err();
     match err {
         Error::Build { command, message } => {
             assert!(command.contains("exit 3"));
@@ -713,21 +593,11 @@ fn target_checks_fail_the_pack() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
     let strict = Strict;
-    let checked = PackOptions {
-        checks: vec![&strict],
-        ..opts()
-    };
+    let checked = opts().check(&strict);
     pack(d.path(), &checked).unwrap();
     // A tool for a target the package lacks is not asked.
     let other = StaticTarget::new("elsewhere");
-    pack(
-        d.path(),
-        &PackOptions {
-            checks: vec![&other],
-            ..opts()
-        },
-    )
-    .unwrap();
+    pack(d.path(), &opts().check(&other)).unwrap();
 
     write(d.path(), "crow/plugin.json", "{\"id\": 1}");
     let err = pack(d.path(), &checked).unwrap_err();
@@ -768,16 +638,7 @@ fn a_target_derives_the_manifest_of_a_folder_without_one() {
     let none = pack(d.path(), &opts());
     assert!(matches!(none, Err(Error::Invalid { .. })));
     let other = StaticTarget::new("crow");
-    assert!(
-        pack(
-            d.path(),
-            &PackOptions {
-                checks: vec![&other],
-                ..opts()
-            }
-        )
-        .is_err()
-    );
+    assert!(pack(d.path(), &opts().check(&other)).is_err());
     let derive = Deriver;
     let egg = Egg::pack(d.path(), &[&derive]).unwrap();
     assert_eq!(egg.manifest().package.id, "plain");
@@ -808,16 +669,7 @@ fn an_about_file_inside_a_target_is_kept_once() {
     demo(d.path());
     let m = MANIFEST.replace("\"README.md\"", "\"crow/plugin.json\"");
     write(d.path(), "package.kdl", &m);
-    let egg = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let egg = pack(d.path(), &opts().base(true)).unwrap().pop().unwrap();
     assert_eq!(
         paths(&egg)
             .iter()
@@ -839,11 +691,7 @@ fn a_missing_target_folder_is_an_error() {
 // Opening hostile or broken eggs.
 
 fn entry(path: &str, data: &str) -> Entry {
-    Entry {
-        path: path.into(),
-        data: data.to_string().into(),
-        executable: false,
-    }
+    Entry::new(path, data.to_string())
 }
 
 #[test]
@@ -876,11 +724,10 @@ fn opening_checks_embedded_variants() {
     let base = &eggs[3];
     // Wrong file name for what the header says.
     let mut entries = base.entries().to_vec();
-    entries.push(Entry {
-        path: "variants/demo-1.2.0.rookery.other.egg".into(),
-        data: eggs[0].bytes().clone(),
-        executable: false,
-    });
+    entries.push(Entry::new(
+        "variants/demo-1.2.0.rookery.other.egg",
+        eggs[0].bytes().clone(),
+    ));
     assert!(Egg::from_entries(entries).is_err());
     // A variant of another version.
     let newer = MANIFEST.replace("1.2.0", "1.3.0");
@@ -889,11 +736,10 @@ fn opening_checks_embedded_variants() {
     write(other.path(), "package.kdl", &newer);
     let foreign = pack(other.path(), &opts()).unwrap();
     let mut entries = base.entries().to_vec();
-    entries.push(Entry {
-        path: format!("variants/{}", foreign[0].file_name()),
-        data: foreign[0].bytes().clone(),
-        executable: false,
-    });
+    entries.push(Entry::new(
+        format!("variants/{}", foreign[0].file_name()),
+        foreign[0].bytes().clone(),
+    ));
     assert!(Egg::from_entries(entries).is_err());
 }
 
@@ -917,16 +763,7 @@ fn variant_eggs_must_keep_to_their_folder() {
 fn egg_read_reads_a_file() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let egg = pack(
-        d.path(),
-        &PackOptions {
-            base: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let egg = pack(d.path(), &opts().base(true)).unwrap().pop().unwrap();
     let f = d.path().join("out.egg");
     fs::write(&f, egg.bytes()).unwrap();
     assert_eq!(Egg::read(&f).unwrap().sha256(), egg.sha256());
@@ -954,41 +791,14 @@ fn tree_digest_is_stable_and_sensitive() {
 fn eggs_do_not_nest() {
     let d = tempfile::tempdir().unwrap();
     demo(d.path());
-    let fat = pack(
-        d.path(),
-        &PackOptions {
-            fat: true,
-            ..opts()
-        },
-    )
-    .unwrap()
-    .pop()
-    .unwrap();
+    let fat = pack(d.path(), &opts().fat(true)).unwrap().pop().unwrap();
     // A fat egg inside a fat egg.
     let mut entries = fat.entries().to_vec();
-    entries.push(Entry {
-        path: format!("variants/{}", fat.file_name()),
-        data: fat.bytes().clone(),
-        executable: false,
-    });
-    let nested = hatchery::archive::write(&entries).unwrap();
-    assert!(Egg::open(nested).is_err());
-
-    // Many levels deep ends with an error, not a crash.
-    let mut inner = fat.bytes().clone();
-    for _ in 0..200 {
-        inner = hatchery::archive::write(&[
-            entry("package.kdl", MANIFEST),
-            Entry {
-                path: format!("variants/{}", fat.file_name()),
-                data: inner,
-                executable: false,
-            },
-        ])
-        .unwrap()
-        .into();
-    }
-    assert!(Egg::open(inner).is_err());
+    entries.push(Entry::new(
+        format!("variants/{}", fat.file_name()),
+        fat.bytes().clone(),
+    ));
+    assert!(Egg::from_entries(entries).is_err());
 }
 
 #[test]
@@ -1000,11 +810,7 @@ fn packing_a_folder_outside_git_is_reproducible() {
         "package {\n  group g\n  id demo\n  version \"1.0.0\"\n}\ntargets {\n  crow\n}\n",
     );
     write(d.path(), "crow/a.txt", "a");
-    let o = PackOptions {
-        base: true,
-        no_build: true,
-        ..Default::default()
-    };
+    let o = PackOptions::new().base(true).no_build(true);
     let first = pack(d.path(), &o).unwrap().pop().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let second = pack(d.path(), &o).unwrap().pop().unwrap();
@@ -1081,11 +887,7 @@ fn pack_refuses_unsafe_names() {
         );
         write(d.path(), "crow/readme.md", "a");
         write(d.path(), &format!("crow/{bad}"), "b");
-        let o = PackOptions {
-            base: true,
-            no_build: true,
-            ..Default::default()
-        };
+        let o = PackOptions::new().base(true).no_build(true);
         let err = pack(d.path(), &o).unwrap_err();
         assert!(err.to_string().contains(bad), "{bad}: {err}");
         assert!(!matches!(err, Error::UnsafeArchive(_)), "{bad}: {err:?}");

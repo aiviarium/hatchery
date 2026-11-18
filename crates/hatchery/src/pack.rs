@@ -10,6 +10,7 @@ use bytes::Bytes;
 use crate::archive;
 use crate::egg::{Egg, Entry, VARIANT_FILE, VARIANTS_DIR, VariantHeader};
 use crate::error::{Error, IoContext, Result};
+use crate::git::Git;
 use crate::glob::Glob;
 use crate::manifest::{self, Defaults, Manifest, Origin, TargetSpec, VariantSpec};
 use crate::target::Target;
@@ -17,6 +18,7 @@ use crate::time::Timestamp;
 
 /// One variant to pack: a target and the os/arch values that pick it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VariantPick {
     /// The target the variant belongs to.
     pub target: String,
@@ -29,6 +31,7 @@ pub struct VariantPick {
 /// What `pack` writes. With nothing chosen, it writes the base egg and
 /// every variant egg.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct PackOptions<'a> {
     /// The base egg.
     pub base: bool,
@@ -49,6 +52,106 @@ pub struct PackOptions<'a> {
     /// The build time when neither `origin` nor `SOURCE_DATE_EPOCH` nor the
     /// git commit gives one. Without it, `built` is left out of the origin.
     pub now: Option<Timestamp>,
+    /// How to run git, which `pack` asks for the commit, the address and the
+    /// commit time of the checkout.
+    pub git: Git,
+}
+
+impl VariantPick {
+    /// The variant of a target with no `os` and no `arch` key. Add them with
+    /// [`VariantPick::os`] and [`VariantPick::arch`].
+    pub fn new(target: impl Into<String>) -> VariantPick {
+        VariantPick {
+            target: target.into(),
+            os: None,
+            arch: None,
+        }
+    }
+
+    /// The variant with this `os` key.
+    #[must_use]
+    pub fn os(mut self, os: impl Into<String>) -> VariantPick {
+        self.os = Some(os.into());
+        self
+    }
+
+    /// The variant with this `arch` key.
+    #[must_use]
+    pub fn arch(mut self, arch: impl Into<String>) -> VariantPick {
+        self.arch = Some(arch.into());
+        self
+    }
+}
+
+impl<'a> PackOptions<'a> {
+    /// Nothing chosen: the base egg and every variant egg, after the build
+    /// commands. The same as [`PackOptions::default`].
+    pub fn new() -> PackOptions<'a> {
+        PackOptions::default()
+    }
+
+    /// Writes the base egg.
+    #[must_use]
+    pub fn base(mut self, base: bool) -> Self {
+        self.base = base;
+        self
+    }
+
+    /// Writes this variant egg, or puts it in the fat egg.
+    #[must_use]
+    pub fn variant(mut self, pick: VariantPick) -> Self {
+        self.variants.push(pick);
+        self
+    }
+
+    /// Writes one fat egg instead of separate eggs.
+    #[must_use]
+    pub fn fat(mut self, fat: bool) -> Self {
+        self.fat = fat;
+        self
+    }
+
+    /// Skips the build commands.
+    #[must_use]
+    pub fn no_build(mut self, no_build: bool) -> Self {
+        self.no_build = no_build;
+        self
+    }
+
+    /// Runs the `check` of this tool on its target's files.
+    #[must_use]
+    pub fn check(mut self, target: &'a dyn Target) -> Self {
+        self.checks.push(target);
+        self
+    }
+
+    /// Applies these defaults instead of a `packages.kdl` above the folder.
+    #[must_use]
+    pub fn defaults(mut self, defaults: Defaults) -> Self {
+        self.defaults = Some(defaults);
+        self
+    }
+
+    /// Writes this origin section instead of reading it from git.
+    #[must_use]
+    pub fn origin(mut self, origin: Origin) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
+    /// The build time when nothing else gives one.
+    #[must_use]
+    pub fn now(mut self, now: Timestamp) -> Self {
+        self.now = Some(now);
+        self
+    }
+
+    /// Runs git this way.
+    #[must_use]
+    pub fn git(mut self, git: Git) -> Self {
+        self.git = git;
+        self
+    }
 }
 
 /// Packs a package folder. Runs build commands first unless `no_build`.
@@ -445,12 +548,13 @@ fn flatten(manifest: &Manifest, dir: &Path, opts: &PackOptions<'_>) -> Manifest 
     }
     m.origin = Some(match &opts.origin {
         Some(o) => o.clone(),
-        None => origin_of(dir, manifest, opts.now),
+        None => origin_of(dir, manifest, opts.now, &opts.git),
     });
     m
 }
 
-fn origin_of(dir: &Path, manifest: &Manifest, now: Option<Timestamp>) -> Origin {
+fn origin_of(dir: &Path, manifest: &Manifest, now: Option<Timestamp>, g: &Git) -> Origin {
+    let git = |dir: &Path, args: &[&str]| git(g, dir, args);
     let commit = git(dir, &["rev-parse", "HEAD"]);
     let repository = manifest
         .about
@@ -483,16 +587,8 @@ fn origin_of(dir: &Path, manifest: &Manifest, now: Option<Timestamp>) -> Origin 
 
 /// The trimmed output of a git command, None when git is missing or the
 /// command fails.
-fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(out.stdout).ok()?.trim().to_string();
+fn git(g: &Git, dir: &Path, args: &[&str]) -> Option<String> {
+    let text = g.run_text(Some(dir), args).ok()?;
     (!text.is_empty()).then_some(text)
 }
 

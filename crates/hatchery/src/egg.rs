@@ -24,6 +24,7 @@ pub const VARIANTS_DIR: &str = "variants";
 
 /// What a variant egg says it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VariantHeader {
     /// The package the variant egg belongs to.
     pub name: Name,
@@ -129,6 +130,7 @@ impl VariantHeader {
 
 /// One file in an egg.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Entry {
     /// `/`-separated, relative.
     pub path: String,
@@ -136,6 +138,23 @@ pub struct Entry {
     pub data: Bytes,
     /// Whether the file is executable. It is written as mode 0755, and as 0644 otherwise.
     pub executable: bool,
+}
+
+impl Entry {
+    /// A file that is not executable.
+    pub fn new(path: impl Into<String>, data: impl Into<Bytes>) -> Entry {
+        Entry {
+            path: path.into(),
+            data: data.into(),
+            executable: false,
+        }
+    }
+
+    /// The same file, executable or not.
+    pub fn executable(mut self, executable: bool) -> Entry {
+        self.executable = executable;
+        self
+    }
 }
 
 /// An opened egg. Every entry was checked when it was opened.
@@ -563,4 +582,25 @@ fn set_mode(path: &Path, executable: bool) -> Result<()> {
 #[cfg(not(unix))]
 fn set_mode(_path: &Path, _executable: bool) -> Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eggs_nested_many_levels_deep_are_an_error() {
+        let manifest = "package {\n  group demo\n  id deep\n  version \"1.0.0\"\n}\n";
+        let mut inner =
+            Bytes::from(archive::write(&[Entry::new("package.kdl", manifest)]).unwrap());
+        for _ in 0..200 {
+            inner = archive::write(&[
+                Entry::new("package.kdl", manifest),
+                Entry::new("variants/demo-deep-1.0.0.egg", inner),
+            ])
+            .unwrap()
+            .into();
+        }
+        assert!(Egg::open(inner).is_err());
+    }
 }

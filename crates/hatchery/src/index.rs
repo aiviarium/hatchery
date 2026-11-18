@@ -15,6 +15,7 @@ use crate::time::Timestamp;
 
 /// `<base>/index.json`: the packages the registry has.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Catalog {
     /// The packages of the registry, sorted when added with [`Catalog::add`].
     #[serde(default)]
@@ -38,6 +39,7 @@ impl Catalog {
 
 /// `<base>/<group>/<id>/index.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct PackageIndex {
     /// The package's group.
     pub group: String,
@@ -102,6 +104,7 @@ impl PackageIndex {
 
 /// What the index says about a package, for display.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct IndexAbout {
     /// A display name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +175,7 @@ pub fn file_name_of(path: &str) -> String {
 
 /// One version of a package.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct IndexVersion {
     /// The base egg's checksum. None until the base egg is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -218,6 +222,7 @@ impl IndexVersion {
 
 /// The `withdrawn` entry of a version, which marks it as not to be installed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct IndexWithdrawn {
     /// Why the version was withdrawn. None when no reason was given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,6 +236,7 @@ pub struct IndexWithdrawn {
 /// as `true`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum IndexRequirement {
     /// A single value, as a string.
     One(String),
@@ -260,6 +266,7 @@ impl IndexRequirement {
 
 /// What a version says about one target.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct IndexTarget {
     /// Whether the target, or one of its variants, has a build command.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -347,6 +354,7 @@ impl IndexTarget {
 
 /// One variant of a target, with its egg's checksum once published.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct IndexVariant {
     /// The OS of the variant. None when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

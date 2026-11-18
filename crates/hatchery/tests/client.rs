@@ -49,10 +49,7 @@ fn publish(
         files.push(("rookery/variants/aarch64/bin", "arm"));
     }
     common::package(&dir, &manifest(id, version, deps, rookery), &files);
-    let opts = PackOptions {
-        no_build: true,
-        ..PackOptions::default()
-    };
+    let opts = PackOptions::new().no_build(true);
     let eggs = pack(&dir, &opts).unwrap();
     let now = Timestamp::parse(NOW).unwrap();
     for e in &eggs {
@@ -511,11 +508,7 @@ fn a_fat_egg_file_installs_with_no_registry() {
             ("rookery/variants/aarch64/bin", "arm"),
         ],
     );
-    let opts = PackOptions {
-        no_build: true,
-        fat: true,
-        ..PackOptions::default()
-    };
+    let opts = PackOptions::new().no_build(true).fat(true);
     let egg = pack(&dir, &opts).unwrap().remove(0);
     assert!(egg.is_fat());
     let file = env.root.join("fat-1.0.0.egg");
@@ -609,7 +602,7 @@ fn requirements_and_min_age_apply_to_registries() {
         }
         e => panic!("{e}"),
     }
-    let opts = hatchery::Options { allow_young: true };
+    let opts = hatchery::Options::new().allow_young(true);
     block_on(client.add_with(&spec("demo/a"), &env.dir("p"), &opts)).unwrap();
 
     let listed = block_on(client.offered(&env.dir("q"))).unwrap().packages;
@@ -966,10 +959,7 @@ fn a_keyed_git_registry_does_not_install_a_version_that_has_only_a_tag() {
         "format 1\npackage {\n group example\n id alpha\n version \"1.0.0\"\n}\ntargets {\n crow {\n }\n}\n",
         &[("crow/plugin.json", "{\"v\":\"1.0.0\"}")],
     );
-    let opts = PackOptions {
-        no_build: true,
-        ..PackOptions::default()
-    };
+    let opts = PackOptions::new().no_build(true);
     let egg = pack(&work, &opts).unwrap().pop().unwrap();
     hatchery::source::git::publish_branch(
         &egg,

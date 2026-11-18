@@ -46,6 +46,7 @@ pub trait Target: Send + Sync {
 
 /// One thing a target's check found wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Problem {
     /// The file, relative to the target's folder.
     pub path: Option<String>,
@@ -83,6 +84,7 @@ impl fmt::Display for Problem {
 /// The files of one target, by path relative to the target's folder
 /// (`/`-separated). The `variants/` folder is not part of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TargetFiles {
     /// The target the files belong to.
     pub target: String,

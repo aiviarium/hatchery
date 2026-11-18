@@ -15,6 +15,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// The package, version and registry an error is about. Any part can be
 /// unknown when the error happens.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct At {
     /// `group/id`, or the id alone when the group is not known yet.
     pub package: String,

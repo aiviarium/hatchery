@@ -12,7 +12,9 @@ hatchery = { git = "https://github.com/aiviarium/hatchery", tag = "v0.1.0", feat
 | `http` | `hatchery::fetch::HttpFetch`, a `Fetch` over HTTP(S) with ureq. Without it, you bring your own |
 | `blocking` | `hatchery::blocking`, a blocking wrapper around `Client` |
 
-Both are off by default. The library has no async runtime. `hatchery::block_on` runs a future to completion on the current thread. Hatchery's own futures wait only on the caller's `Fetch`, so they run on any executor.
+Both are off by default. The library has no async runtime. `hatchery::block_on` runs a future to completion on the current thread.
+
+The futures block the thread they run on. They run `git` and wait for it, and `HttpFetch` waits for ureq. An async caller runs each client call on a thread for blocking work, such as `tokio::task::spawn_blocking`, and drives it there with `block_on`. A `Fetch` of your own that does not block doesn't help with a git registry, since git still blocks.
 
 ## A usage example
 
@@ -71,6 +73,7 @@ Where packages come from. Git repositories, static registries, single git folder
 pub trait Source: Send + Sync {
     fn label(&self) -> &str;
     fn is_local(&self) -> bool { false }
+    fn warnings(&self) -> Vec<String> { Vec::new() }
     fn names(&self) -> BoxFuture<'_, Result<Vec<Name>>>;
     fn versions<'a>(&'a self, name: &'a Name) -> BoxFuture<'a, Result<Vec<Offer>>>;
     fn details<'a>(&'a self, offer: &'a Offer) -> BoxFuture<'a, Result<Details>>;
@@ -80,16 +83,16 @@ pub trait Source: Send + Sync {
 }
 ```
 
-`names`, `details` and `fetch_variant` have default bodies. `Source::fetch` returns an egg whose checksum and signature the source has verified, and whose manifest names the offered package and version.
+`names`, `details`, `fetch_variant` and `warnings` have default bodies. `warnings` reports what the source skipped, such as a package whose `package.kdl` it cannot read. The client adds them to its reports and listings. `Source::fetch` returns an egg whose checksum and signature the source has verified, and whose manifest names the offered package and version.
 
 A tool adds a kind of registry with `ClientBuilder::kind(name, factory)`. A registry line of that node name is then served by the factory's source.
 
 | Item | Meaning |
 | --- | --- |
-| `Offer` | One version a source offers, with its registry label, times, checksum and signature, and for git its commit, ref and path |
+| `Offer` | One version a source offers, with its registry label, times, checksum and signature, and for git its commit, ref and path. `needs_signature` marks a version of a keyed registry that has only a tag. It is never installed |
 | `Details` | Display data and the targets of a version, so that resolving a version can skip the egg |
 | `StaticRegistry` | A static registry, from `StaticRegistry::dir`, `::http` or `::new` over any `RegistryFiles` |
-| `GitRegistry`, `GitFolder`, `FolderSource`, `FileSource` | The other built-in sources |
+| `GitRegistry`, `GitFolder`, `FolderSource`, `FileSource` | The other built-in sources. `GitRegistry::unsigned_tags(true)` lets a keyed registry install tag-only versions |
 
 ## Fetch
 
@@ -121,12 +124,13 @@ Built with `Client::builder()`:
 
 | Client method | Meaning |
 | --- | --- |
-| `offered(dir).await` | The packages the registries offer, each with its about data, versions, installed version and available update, and when a held version can be installed |
+| `offered(dir).await` | A `Listing`: the packages the registries offer, each with its about data, versions, installed version and available update, and when a held version can be installed. Its `warnings` say what a registry skipped |
 | `add(spec, dir).await`, `add_with(spec, dir, &Options)` | Resolves, verifies, unpacks and locks a package and its dependencies. `Options::allow_young` skips the minimum release age for the package you add |
 | `update(name, dir).await` | Updates one package, or all with `None` |
 | `install(dir).await` | Installs exactly what `eggs.lock` lists |
 | `remove(name, dir)` | Removes a package. Refuses while a dependent is installed |
 | `installed(dir)` | The packages in a folder, as `Installed` |
+| `withdrawn(dir).await` | The installed packages whose version their registry has withdrawn since, with the reason |
 | `variant(&Installed, &Platform).await` | The files of one variant. Downloads and verifies its egg on first use |
 | `fetch(spec, variants, &Options).await` | Fetches the base egg and variant eggs without installing. `variants` are named `<target>.<key>`, all when `None` |
 
@@ -142,7 +146,7 @@ An opened archive. `Egg::open` checks each entry.
 | --- | --- |
 | `Egg::open(bytes)`, `Egg::read(path)` | Opens an egg of any kind. Refuses unsafe entries |
 | `Egg::pack(dir, targets)` | Packs a folder into a base egg without a build, checking each target |
-| `Egg::from_entries(entries)` | Builds an egg from `Entry` values, written deterministically |
+| `Egg::from_entries(entries)` | Builds an egg from `Entry` values, written deterministically. `Entry::new(path, data)` makes one |
 | `manifest()` | The package, about, targets and origin |
 | `variant()` | The header of a variant egg, `None` for others |
 | `is_fat()` | Whether variant eggs are inside |
@@ -154,7 +158,14 @@ An opened archive. `Egg::open` checks each entry.
 | `fatten(&[variants])` | A fat egg made of this base egg and the variant eggs you pass |
 | `unpack(dest)` | Unpacks into a package folder |
 
-`hatchery::pack(dir, &PackOptions)` is `hatchery pack`. It returns the variant eggs first and the base or fat egg last. `PackOptions` has `base`, `variants` (a list of `VariantPick`), `fat`, `no_build` and `checks`. It also has `defaults`, `origin` and `now`, which replace what is otherwise read from `packages.kdl`, git and the clock.
+`hatchery::pack(dir, &PackOptions)` is `hatchery pack`. It returns the variant eggs first and the base or fat egg last. `PackOptions::new()` starts the options, and its methods set them: `base`, `variant(VariantPick)`, `fat`, `no_build` and `check`. `defaults`, `origin` and `now` replace what is otherwise read from `packages.kdl`, git and the clock. `git(Git)` sets how `pack` runs git.
+
+```rust
+let opts = PackOptions::new()
+    .no_build(true)
+    .variant(VariantPick::new("rookery").os("linux").arch("x86_64"));
+let eggs = hatchery::pack(dir, &opts)?;
+```
 
 ## Publishing and tree_digest
 
@@ -170,6 +181,18 @@ pub fn tree_digest(dir: &Path) -> Result<String>;
 ## Signing
 
 The `sign` module has `parse_signing_key`, `parse_verifying_key`, `format_signing_key`, `format_verifying_key`, `message`, `sign` and `verify`. Keys are written `ed25519:` and 64 hex digits.
+
+## Data types
+
+The structs with public fields and the enums other than `Error` are marked `non_exhaustive`, so a later version can add a field or a variant. Read their fields and match with `..`. To make one, use its constructor or its builder:
+
+| Type | Made with |
+| --- | --- |
+| `PackOptions`, `VariantPick`, `Options`, `Origin` | `new()` and setter methods |
+| `Offer`, `Details`, `TargetInfo`, `VariantInfo`, `Withdrawn` | `new(…)`, then set the public fields. For a `Source` of your own |
+| `Problem`, `TargetFiles`, `Manifest`, `Requirement`, `VariantSpec`, `Dependency` | `new(…)`. For a `Target` of your own |
+| `Entry` | `Entry::new(path, data)`, and `.executable(true)` |
+| `Name`, `Spec`, `Config`, `RegistryConfig` | `Name::new` and `parse`, `Spec::parse` and `Spec::git`, `Config::load` and `parse`, `RegistryConfig::new` |
 
 ## Errors
 

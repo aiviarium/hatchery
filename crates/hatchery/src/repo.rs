@@ -19,6 +19,7 @@ pub const DEFAULT_TAG: &str = "v{version}";
 
 /// The root manifest of a repository that holds packages: the defaults they share, where they are and how they are released.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct RepoManifest {
     /// The `format` number of the file.
     pub format: u32,
@@ -34,6 +35,7 @@ pub struct RepoManifest {
 
 /// A line of the `packages` block.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PackageEntry {
     /// Every folder matching the glob that has a `package.kdl`.
     Find {
@@ -53,6 +55,7 @@ pub enum PackageEntry {
 
 /// The `release` block of `packages.kdl`.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Release {
     /// The tag pattern for all packages, with `{version}` (and optionally
     /// `{id}`) in it.
@@ -67,6 +70,7 @@ pub struct Release {
 
 /// Where built eggs are published: a branch, and a folder in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EggsBranch {
     /// The branch that holds the eggs.
     pub branch: String,
@@ -76,6 +80,7 @@ pub struct EggsBranch {
 
 /// A released version that must not be installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Withdrawal {
     /// The package's id, or `group/id`.
     pub package: String,
@@ -88,6 +93,7 @@ pub struct Withdrawal {
 /// A package folder of a repository, relative to its root, and the tag
 /// pattern of its releases.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RepoPackage {
     /// The package's folder, relative to the root of the repository and `/`-separated.
     pub path: String,
