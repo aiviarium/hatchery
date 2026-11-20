@@ -11,6 +11,7 @@ Hatchery packs a package folder into an egg and publishes eggs to a registry. It
 | [eggs.lock](eggs-lock.md) | What is installed and from where |
 | [Eggs](egg.md) | The layout of base, variant and fat eggs |
 | [Registries](registries.md) | Static registries, a git repository as a registry, publishing, signing and withdrawing |
+| [From the prototype](from-the-prototype.md) | What replaced `.crowplugin` and `plugins.lock`, and what is new |
 | [Command line](cli.md) | Every command and flag, with a CI pipeline |
 | [Rust API](api.md) | The client, the three traits, `Egg`, publishing and the errors |
 | [Playground](playground.md) | A folder with example packages and a registry to try the command in |
